@@ -24,8 +24,10 @@ bool requiredExtensionsAvailable(std::vector<const char *> required_extensions);
 bool createDebugMessanger(VkInstance instance,
                           VkDebugUtilsMessengerEXT *out_debug_messenger);
 
-bool createVulkanInstance(VkApplicationInfo application_info,
-                          SDL_Window *window, VkInstance *out_instance);
+bool createInstance(VkApplicationInfo application_info, SDL_Window *window,
+                    VkInstance *out_instance);
+bool createSurface(SDL_Window *window, VkInstance instance,
+                   VkSurfaceKHR *out_surface);
 
 int main(int argc, char **argv) {
   SDL_Window *window;
@@ -59,15 +61,23 @@ int main(int argc, char **argv) {
 #endif
 
   VkInstance instance;
-  if (!createVulkanInstance(application_info, window, &instance)) {
+  if (!createInstance(application_info, window, &instance)) {
     ERROR("Failed to create vulkan instance!");
     exit(1);
   }
 
 #ifndef NDEBUG
   VkDebugUtilsMessengerEXT debug_messenger;
-  createDebugMessanger(instance, &debug_messenger);
+  if (!createDebugMessanger(instance, &debug_messenger)) {
+    ERROR("Failed to create vulkan debug messenger!");
+  }
 #endif
+
+  VkSurfaceKHR surface;
+  if (!createSurface(window, instance, &surface)) {
+    FATAL("Failed to create vulkan surface!");
+    return false;
+  }
 
   bool running = true;
   while (running) {
@@ -90,6 +100,7 @@ int main(int argc, char **argv) {
     }
   }
 
+  vkDestroySurfaceKHR(instance, surface, 0);
 #ifndef NDEBUG
   PFN_vkDestroyDebugUtilsMessengerEXT func =
       (PFN_vkDestroyDebugUtilsMessengerEXT)vkGetInstanceProcAddr(
@@ -101,8 +112,8 @@ int main(int argc, char **argv) {
   return 0;
 }
 
-bool createVulkanInstance(VkApplicationInfo application_info,
-                          SDL_Window *window, VkInstance *out_instance) {
+bool createInstance(VkApplicationInfo application_info, SDL_Window *window,
+                    VkInstance *out_instance) {
   std::vector<const char *> required_layers;
 #ifndef NDEBUG
   required_layers.emplace_back("VK_LAYER_KHRONOS_validation");
@@ -256,6 +267,15 @@ bool createDebugMessanger(VkInstance instance,
       (PFN_vkCreateDebugUtilsMessengerEXT)vkGetInstanceProcAddr(
           instance, "vkCreateDebugUtilsMessengerEXT");
   VK_CHECK(func(instance, &debug_create_info, 0, out_debug_messenger));
+
+  return true;
+}
+
+bool createSurface(SDL_Window *window, VkInstance instance,
+                   VkSurfaceKHR *out_surface) {
+  if (!SDL_Vulkan_CreateSurface(window, instance, out_surface)) {
+    return false;
+  }
 
   return true;
 }
