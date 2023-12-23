@@ -5,8 +5,18 @@
 #include <SDL2/SDL_vulkan.h>
 #include <assert.h>
 #include <stdint.h>
+#include <string.h>
 #include <vector>
 #include <vulkan/vulkan.h>
+
+struct VulkanDevice {
+  VkPhysicalDevice physical_device;
+  VkDevice logical_device;
+
+  VkPhysicalDeviceProperties properties;
+  VkPhysicalDeviceFeatures features;
+  VkPhysicalDeviceMemoryProperties memory;
+};
 
 #define VK_CHECK(result)                                                       \
   { assert(result == VK_SUCCESS); }
@@ -28,6 +38,9 @@ bool createInstance(VkApplicationInfo application_info, SDL_Window *window,
                     VkInstance *out_instance);
 bool createSurface(SDL_Window *window, VkInstance instance,
                    VkSurfaceKHR *out_surface);
+bool deviceExtensionsAvailable(VkPhysicalDevice physical_device,
+                               std::vector<const char *> required_extensions);
+bool createDevice(VkInstance instance, VulkanDevice *out_device);
 
 int main(int argc, char **argv) {
   SDL_Window *window;
@@ -76,7 +89,13 @@ int main(int argc, char **argv) {
   VkSurfaceKHR surface;
   if (!createSurface(window, instance, &surface)) {
     FATAL("Failed to create vulkan surface!");
-    return false;
+    exit(1);
+  }
+
+  VulkanDevice device;
+  if (!createDevice(instance, &device)) {
+    FATAL("Failed to create vulkan device!");
+    exit(1);
   }
 
   bool running = true;
@@ -100,6 +119,7 @@ int main(int argc, char **argv) {
     }
   }
 
+  vkDestroyDevice(device.logical_device, 0);
   vkDestroySurfaceKHR(instance, surface, 0);
 #ifndef NDEBUG
   PFN_vkDestroyDebugUtilsMessengerEXT func =
@@ -275,6 +295,105 @@ bool createSurface(SDL_Window *window, VkInstance instance,
                    VkSurfaceKHR *out_surface) {
   if (!SDL_Vulkan_CreateSurface(window, instance, out_surface)) {
     return false;
+  }
+
+  return true;
+}
+
+bool createDevice(VkInstance instance, VulkanDevice *out_device) {
+  std::vector<VkPhysicalDevice> physical_devices;
+  uint32_t physical_device_count = 0;
+  VK_CHECK(vkEnumeratePhysicalDevices(instance, &physical_device_count, 0));
+  if (physical_device_count == 0) {
+    ERROR("Failed to find GPU with Vulkan support!");
+    return false;
+  }
+  physical_devices.resize(physical_device_count);
+  VK_CHECK(vkEnumeratePhysicalDevices(instance, &physical_device_count,
+                                      physical_devices.data()));
+
+  for (uint32_t i = 0; i < physical_devices.size(); ++i) {
+    VkPhysicalDevice current_physical_device = physical_devices[i];
+
+    std::vector<const char *> device_extension_names;
+    device_extension_names.emplace_back(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
+
+    if (!deviceExtensionsAvailable(current_physical_device,
+                                   device_extension_names)) {
+      return false;
+    }
+
+    VkPhysicalDeviceProperties device_properties;
+    vkGetPhysicalDeviceProperties(current_physical_device, &device_properties);
+    VkPhysicalDeviceFeatures device_features;
+    vkGetPhysicalDeviceFeatures(current_physical_device, &device_features);
+    VkPhysicalDeviceMemoryProperties device_memory;
+    vkGetPhysicalDeviceMemoryProperties(current_physical_device,
+                                        &device_memory);
+
+    out_device->physical_device = current_physical_device;
+    out_device->properties = device_properties;
+    out_device->features = device_features;
+    out_device->memory = device_memory;
+
+    break;
+  }
+
+  std::vector<const char *> required_extension_names;
+  required_extension_names.emplace_back(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
+#ifdef PLATFORM_APPLE
+  required_extension_names.emplace_back("VK_KHR_portability_subset");
+#endif
+
+  VkPhysicalDeviceFeatures device_features = {};
+
+  VkDeviceCreateInfo device_create_info = {};
+  device_create_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+  device_create_info.pNext = 0;
+  device_create_info.flags = 0;
+  device_create_info.queueCreateInfoCount = 0;
+  device_create_info.pQueueCreateInfos = 0;
+  device_create_info.enabledLayerCount = 0;   /* deprecated */
+  device_create_info.ppEnabledLayerNames = 0; /* deprecated */
+  device_create_info.enabledExtensionCount = required_extension_names.size();
+  device_create_info.ppEnabledExtensionNames = required_extension_names.data();
+  device_create_info.pEnabledFeatures = &device_features;
+
+  VK_CHECK(vkCreateDevice(out_device->physical_device, &device_create_info, 0,
+                          &out_device->logical_device));
+
+  return true;
+}
+
+bool deviceExtensionsAvailable(VkPhysicalDevice physical_device,
+                               std::vector<const char *> required_extensions) {
+  uint32_t available_extension_count = 0;
+  std::vector<VkExtensionProperties> available_extensions;
+
+  VK_CHECK(vkEnumerateDeviceExtensionProperties(physical_device, 0,
+                                                &available_extension_count, 0));
+  if (available_extension_count != 0) {
+    available_extensions.resize(available_extension_count);
+    VK_CHECK(vkEnumerateDeviceExtensionProperties(physical_device, 0,
+                                                  &available_extension_count,
+                                                  &available_extensions[0]));
+
+    for (uint32_t i = 0; i < required_extensions.size(); ++i) {
+      bool found = false;
+      for (uint32_t j = 0; j < available_extension_count; ++j) {
+        if (strcmp(required_extensions[i],
+                   available_extensions[j].extensionName)) {
+          found = true;
+          break;
+        }
+      }
+
+      if (!found) {
+        DEBUG("Required device extension not found: '%s', skipping device.",
+              required_extensions[i]);
+        return false;
+      }
+    }
   }
 
   return true;
