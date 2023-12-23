@@ -21,6 +21,8 @@ VKAPI_ATTR VkBool32 VKAPI_CALL vulkanDebugCallback(
     const VkDebugUtilsMessengerCallbackDataEXT *callback_data, void *user_data);
 bool requiredLayersAvailable(std::vector<const char *> required_layers);
 bool requiredExtensionsAvailable(std::vector<const char *> required_extensions);
+bool createDebugMessanger(VkInstance instance,
+                          VkDebugUtilsMessengerEXT *out_debug_messenger);
 
 bool createVulkanInstance(VkApplicationInfo application_info,
                           SDL_Window *window, VkInstance *out_instance);
@@ -62,6 +64,11 @@ int main(int argc, char **argv) {
     exit(1);
   }
 
+#ifndef NDEBUG
+  VkDebugUtilsMessengerEXT debug_messenger;
+  createDebugMessanger(instance, &debug_messenger);
+#endif
+
   bool running = true;
   while (running) {
     SDL_Event event;
@@ -83,6 +90,12 @@ int main(int argc, char **argv) {
     }
   }
 
+#ifndef NDEBUG
+  PFN_vkDestroyDebugUtilsMessengerEXT func =
+      (PFN_vkDestroyDebugUtilsMessengerEXT)vkGetInstanceProcAddr(
+          instance, "vkDestroyDebugUtilsMessengerEXT");
+  func(instance, debug_messenger, 0);
+#endif
   vkDestroyInstance(instance, 0);
 
   return 0;
@@ -217,4 +230,32 @@ vulkanDebugCallback(VkDebugUtilsMessageSeverityFlagBitsEXT message_severity,
   }
 
   return VK_FALSE;
+}
+
+bool createDebugMessanger(VkInstance instance,
+                          VkDebugUtilsMessengerEXT *out_debug_messenger) {
+  uint32_t log_severity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT |
+                          VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
+                          VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT |
+                          VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT;
+
+  VkDebugUtilsMessengerCreateInfoEXT debug_create_info = {};
+  debug_create_info.sType =
+      VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
+  debug_create_info.pNext = 0;
+  debug_create_info.flags = 0;
+  debug_create_info.messageSeverity = log_severity;
+  debug_create_info.messageType =
+      VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT |
+      VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT |
+      VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT;
+  debug_create_info.pfnUserCallback = vulkanDebugCallback;
+  debug_create_info.pUserData = 0;
+
+  PFN_vkCreateDebugUtilsMessengerEXT func =
+      (PFN_vkCreateDebugUtilsMessengerEXT)vkGetInstanceProcAddr(
+          instance, "vkCreateDebugUtilsMessengerEXT");
+  VK_CHECK(func(instance, &debug_create_info, 0, out_debug_messenger));
+
+  return true;
 }
