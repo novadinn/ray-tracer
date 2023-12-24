@@ -131,27 +131,6 @@ int main(int argc, char **argv) {
     exit(1);
   }
 
-  VkQueue graphics_queue;
-  vkGetDeviceQueue(
-      device.logical_device,
-      device.queue_family_indices[VULKAN_DEVICE_QUEUE_TYPE_GRAPHICS], 0,
-      &graphics_queue);
-  VkQueue present_queue;
-  vkGetDeviceQueue(
-      device.logical_device,
-      device.queue_family_indices[VULKAN_DEVICE_QUEUE_TYPE_PRESENT], 0,
-      &present_queue);
-  VkQueue compute_queue;
-  vkGetDeviceQueue(
-      device.logical_device,
-      device.queue_family_indices[VULKAN_DEVICE_QUEUE_TYPE_COMPUTE], 0,
-      &compute_queue);
-  VkQueue transfer_queue;
-  vkGetDeviceQueue(
-      device.logical_device,
-      device.queue_family_indices[VULKAN_DEVICE_QUEUE_TYPE_TRANSFER], 0,
-      &transfer_queue);
-
   VulkanSwapchain swapchain;
   if (!createSwapchain(&device, surface, window_width, window_height,
                        &swapchain)) {
@@ -173,6 +152,47 @@ int main(int argc, char **argv) {
                            window_width, window_height, &framebuffers[i])) {
       FATAL("Failed to create a framebuffer!");
       exit(1);
+    }
+  }
+
+  std::unordered_map<VulkanDeviceQueueType, VkQueue> queues;
+  std::unordered_map<VulkanDeviceQueueType, VkCommandPool> command_pools;
+  std::unordered_map<VulkanDeviceQueueType, std::vector<VkCommandBuffer>>
+      command_buffers;
+  /* TODO: we dont need multiple command pools and command buffers, if family
+   * indices are not unique */
+  for (auto it = device.queue_family_indices.begin();
+       it != device.queue_family_indices.end(); it++) {
+    VkQueue queue;
+    vkGetDeviceQueue(device.logical_device, it->second, 0, &queue);
+    queues.emplace(it->first, queue);
+
+    VkCommandPoolCreateInfo command_pool_create_info = {};
+    command_pool_create_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+    command_pool_create_info.pNext = 0;
+    command_pool_create_info.flags =
+        VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+    command_pool_create_info.queueFamilyIndex = it->second;
+
+    VkCommandPool command_pool;
+    VK_CHECK(vkCreateCommandPool(device.logical_device,
+                                 &command_pool_create_info, 0, &command_pool));
+    command_pools.emplace(it->first, command_pool);
+
+    command_buffers.emplace(it->first, std::vector<VkCommandBuffer>{});
+    command_buffers[it->first].resize(swapchain.images.size());
+    for (uint32_t i = 0; i < command_buffers[it->first].size(); ++i) {
+      VkCommandBufferAllocateInfo command_buffer_allocate_info = {};
+      command_buffer_allocate_info.sType =
+          VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+      command_buffer_allocate_info.pNext = 0;
+      command_buffer_allocate_info.commandPool = command_pool;
+      command_buffer_allocate_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+      command_buffer_allocate_info.commandBufferCount = 1;
+
+      VK_CHECK(vkAllocateCommandBuffers(device.logical_device,
+                                        &command_buffer_allocate_info,
+                                        &command_buffers[it->first][i]));
     }
   }
 
@@ -229,6 +249,14 @@ int main(int argc, char **argv) {
     }
   }
 
+  for (auto it = command_buffers.begin(); it != command_buffers.end(); it++) {
+    std::vector<VkCommandBuffer> &command_buffers = it->second;
+    vkFreeCommandBuffers(device.logical_device, command_pools[it->first],
+                         command_buffers.size(), command_buffers.data());
+  }
+  for (auto it = command_pools.begin(); it != command_pools.end(); it++) {
+    vkDestroyCommandPool(device.logical_device, it->second, 0);
+  }
   for (uint32_t i = 0; i < swapchain.max_frames_in_flight; ++i) {
     vkDestroySemaphore(device.logical_device, image_available_semaphores[i], 0);
     vkDestroySemaphore(device.logical_device, queue_complete_semaphores[i], 0);
