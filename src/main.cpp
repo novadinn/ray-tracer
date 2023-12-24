@@ -154,13 +154,45 @@ int main(int argc, char **argv) {
 
   std::vector<VkFramebuffer> framebuffers;
   framebuffers.resize(swapchain.images.size());
-  for (int i = 0; i < framebuffers.size(); ++i) {
+  for (uint32_t i = 0; i < framebuffers.size(); ++i) {
     if (!createFramebuffer(&device, render_pass,
                            std::vector<VkImageView>{swapchain.image_views[i]},
                            window_width, window_height, &framebuffers[i])) {
       FATAL("Failed to create a framebuffer!");
       exit(1);
     }
+  }
+
+  std::vector<VkSemaphore> image_available_semaphores;
+  image_available_semaphores.resize(swapchain.max_frames_in_flight);
+  std::vector<VkSemaphore> queue_complete_semaphores;
+  queue_complete_semaphores.resize(swapchain.max_frames_in_flight);
+  std::vector<VkFence> in_flight_fences;
+  in_flight_fences.resize(swapchain.max_frames_in_flight);
+  for (uint32_t i = 0; i < swapchain.max_frames_in_flight; ++i) {
+    VkSemaphoreCreateInfo semaphore_create_info = {};
+    semaphore_create_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+    semaphore_create_info.pNext = 0;
+    semaphore_create_info.flags = 0;
+
+    VK_CHECK(vkCreateSemaphore(device.logical_device, &semaphore_create_info, 0,
+                               &image_available_semaphores[i]));
+    VK_CHECK(vkCreateSemaphore(device.logical_device, &semaphore_create_info, 0,
+                               &queue_complete_semaphores[i]));
+
+    VkFenceCreateInfo fence_create_info = {};
+    fence_create_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+    fence_create_info.pNext = 0;
+    fence_create_info.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+
+    VK_CHECK(vkCreateFence(device.logical_device, &fence_create_info, 0,
+                           &in_flight_fences[i]));
+  }
+
+  std::vector<VkFence *> images_in_flight;
+  images_in_flight.resize(swapchain.images.size());
+  for (uint32_t i = 0; i < images_in_flight.size(); ++i) {
+    images_in_flight[i] = 0;
   }
 
   bool running = true;
@@ -184,7 +216,12 @@ int main(int argc, char **argv) {
     }
   }
 
-  for (int i = 0; i < framebuffers.size(); ++i) {
+  for (uint32_t i = 0; i < swapchain.max_frames_in_flight; ++i) {
+    vkDestroySemaphore(device.logical_device, image_available_semaphores[i], 0);
+    vkDestroySemaphore(device.logical_device, queue_complete_semaphores[i], 0);
+    vkDestroyFence(device.logical_device, in_flight_fences[i], 0);
+  }
+  for (uint32_t i = 0; i < framebuffers.size(); ++i) {
     vkDestroyFramebuffer(device.logical_device, framebuffers[i], 0);
   }
   vkDestroyRenderPass(device.logical_device, render_pass, 0);
@@ -495,7 +532,7 @@ bool createDevice(VkInstance instance, VkSurfaceKHR surface,
   unique_queue_indices.emplace(out_device->transfer_family_index);
 
   std::vector<VkDeviceQueueCreateInfo> queue_create_infos;
-  for (int i = 0; i < queue_indices.size(); ++i) {
+  for (uint32_t i = 0; i < queue_indices.size(); ++i) {
     float queue_priority = 1.0f;
     VkDeviceQueueCreateInfo queue_create_info = {};
     queue_create_info.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
@@ -717,7 +754,7 @@ bool createSwapchain(VulkanDevice *device, VkSurfaceKHR surface, uint32_t width,
 }
 
 void destroySwapchain(VulkanSwapchain *swapchain, VulkanDevice *device) {
-  for (int i = 0; i < swapchain->image_views.size(); ++i) {
+  for (uint32_t i = 0; i < swapchain->image_views.size(); ++i) {
     vkDestroyImageView(device->logical_device, swapchain->image_views[i], 0);
   }
 
