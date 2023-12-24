@@ -61,6 +61,8 @@ void destroyDevice(VulkanDevice *device);
 bool createSwapchain(VulkanDevice *device, VkSurfaceKHR surface, uint32_t width,
                      uint32_t height, VulkanSwapchain *out_swapchain);
 void destroySwapchain(VulkanSwapchain *swapchain, VulkanDevice *device);
+bool createRenderPass(VulkanDevice *device, VulkanSwapchain *swapchain,
+                      VkRenderPass *out_render_pass);
 
 int main(int argc, char **argv) {
   SDL_Window *window;
@@ -134,7 +136,13 @@ int main(int argc, char **argv) {
   VulkanSwapchain swapchain;
   if (!createSwapchain(&device, surface, 800, 600, &swapchain)) {
     FATAL("Failed to create a swapchain!");
-    return false;
+    exit(1);
+  }
+
+  VkRenderPass render_pass;
+  if (!createRenderPass(&device, &swapchain, &render_pass)) {
+    FATAL("Failed to create a render pass!");
+    exit(1);
   }
 
   bool running = true;
@@ -158,6 +166,7 @@ int main(int argc, char **argv) {
     }
   }
 
+  vkDestroyRenderPass(device.logical_device, render_pass, 0);
   destroySwapchain(&swapchain, &device);
   destroyDevice(&device);
   vkDestroySurfaceKHR(instance, surface, 0);
@@ -692,4 +701,62 @@ void destroySwapchain(VulkanSwapchain *swapchain, VulkanDevice *device) {
   }
 
   vkDestroySwapchainKHR(device->logical_device, swapchain->handle, 0);
+}
+
+bool createRenderPass(VulkanDevice *device, VulkanSwapchain *swapchain,
+                      VkRenderPass *out_render_pass) {
+  VkAttachmentDescription attachment_description = {};
+  attachment_description.flags = 0;
+  attachment_description.format = swapchain->surface_format.format;
+  attachment_description.samples = VK_SAMPLE_COUNT_1_BIT;
+  attachment_description.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+  attachment_description.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+  attachment_description.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+  attachment_description.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+  attachment_description.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+  attachment_description.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+
+  VkAttachmentReference color_attachment_reference = {};
+  color_attachment_reference.attachment = 0;
+  color_attachment_reference.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+  VkSubpassDescription subpass_description = {};
+  subpass_description.flags = 0;
+  subpass_description.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+  subpass_description.inputAttachmentCount = 0;
+  subpass_description.pInputAttachments = 0;
+  subpass_description.colorAttachmentCount = 1;
+  subpass_description.pColorAttachments = &color_attachment_reference;
+  subpass_description.pResolveAttachments = 0;
+  subpass_description.pDepthStencilAttachment = 0;
+  subpass_description.preserveAttachmentCount = 0;
+  subpass_description.pPreserveAttachments = 0;
+
+  VkSubpassDependency subpass_dependency = {};
+  subpass_dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
+  subpass_dependency.dstSubpass = 0;
+  subpass_dependency.srcStageMask =
+      VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+  subpass_dependency.srcAccessMask = 0;
+  subpass_dependency.dstStageMask =
+      VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+  subpass_dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT |
+                                     VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+  subpass_dependency.dependencyFlags = 0;
+
+  VkRenderPassCreateInfo render_pass_create_info = {};
+  render_pass_create_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+  render_pass_create_info.pNext = 0;
+  render_pass_create_info.flags = 0;
+  render_pass_create_info.attachmentCount = 1;
+  render_pass_create_info.pAttachments = &attachment_description;
+  render_pass_create_info.subpassCount = 1;
+  render_pass_create_info.pSubpasses = &subpass_description;
+  render_pass_create_info.dependencyCount = 1;
+  render_pass_create_info.pDependencies = &subpass_dependency;
+
+  VK_CHECK(vkCreateRenderPass(device->logical_device, &render_pass_create_info,
+                              0, out_render_pass));
+
+  return true;
 }
