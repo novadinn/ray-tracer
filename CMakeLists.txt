@@ -36,7 +36,7 @@ include_directories(
   vendor/glm
 )
 
-add_executable(${PROJECT_NAME} src/main.cpp src/logger.cpp)
+add_executable(${PROJECT_NAME} src/main.cpp src/logger.cpp src/vulkan_swapchain.cpp src/vulkan_device.cpp)
 
 target_link_directories(
   ${PROJECT_NAME} PRIVATE
