@@ -8,6 +8,7 @@
 #include <set>
 #include <stdint.h>
 #include <string.h>
+#include <unordered_map>
 #include <vector>
 #include <vulkan/vulkan.h>
 
@@ -19,6 +20,13 @@ struct VulkanSwapchain {
   VkSurfaceFormatKHR surface_format;
 };
 
+enum VulkanDeviceQueueType {
+  VULKAN_DEVICE_QUEUE_TYPE_GRAPHICS,
+  VULKAN_DEVICE_QUEUE_TYPE_PRESENT,
+  VULKAN_DEVICE_QUEUE_TYPE_COMPUTE,
+  VULKAN_DEVICE_QUEUE_TYPE_TRANSFER,
+};
+
 struct VulkanDevice {
   VkPhysicalDevice physical_device;
   VkDevice logical_device;
@@ -27,10 +35,7 @@ struct VulkanDevice {
   VkPhysicalDeviceFeatures features;
   VkPhysicalDeviceMemoryProperties memory;
 
-  uint32_t graphics_family_index = 0;
-  uint32_t present_family_index = 0;
-  uint32_t compute_family_index = 0;
-  uint32_t transfer_family_index = 0;
+  std::unordered_map<VulkanDeviceQueueType, uint32_t> queue_family_indices;
 };
 
 #define VK_CHECK(result)                                                       \
@@ -127,17 +132,25 @@ int main(int argc, char **argv) {
   }
 
   VkQueue graphics_queue;
-  vkGetDeviceQueue(device.logical_device, device.graphics_family_index, 0,
-                   &graphics_queue);
+  vkGetDeviceQueue(
+      device.logical_device,
+      device.queue_family_indices[VULKAN_DEVICE_QUEUE_TYPE_GRAPHICS], 0,
+      &graphics_queue);
   VkQueue present_queue;
-  vkGetDeviceQueue(device.logical_device, device.present_family_index, 0,
-                   &present_queue);
+  vkGetDeviceQueue(
+      device.logical_device,
+      device.queue_family_indices[VULKAN_DEVICE_QUEUE_TYPE_PRESENT], 0,
+      &present_queue);
   VkQueue compute_queue;
-  vkGetDeviceQueue(device.logical_device, device.compute_family_index, 0,
-                   &compute_queue);
+  vkGetDeviceQueue(
+      device.logical_device,
+      device.queue_family_indices[VULKAN_DEVICE_QUEUE_TYPE_COMPUTE], 0,
+      &compute_queue);
   VkQueue transfer_queue;
-  vkGetDeviceQueue(device.logical_device, device.transfer_family_index, 0,
-                   &transfer_queue);
+  vkGetDeviceQueue(
+      device.logical_device,
+      device.queue_family_indices[VULKAN_DEVICE_QUEUE_TYPE_TRANSFER], 0,
+      &transfer_queue);
 
   VulkanSwapchain swapchain;
   if (!createSwapchain(&device, surface, window_width, window_height,
@@ -501,35 +514,53 @@ bool createDevice(VkInstance instance, VkSurfaceKHR surface,
     out_device->properties = device_properties;
     out_device->features = device_features;
     out_device->memory = device_memory;
-    out_device->graphics_family_index = graphics_family_index;
-    out_device->present_family_index = present_family_index;
-    out_device->compute_family_index = compute_family_index;
-    out_device->transfer_family_index = transfer_family_index;
+    out_device->queue_family_indices.emplace(VULKAN_DEVICE_QUEUE_TYPE_GRAPHICS,
+                                             graphics_family_index);
+    out_device->queue_family_indices.emplace(VULKAN_DEVICE_QUEUE_TYPE_PRESENT,
+                                             present_family_index);
+    out_device->queue_family_indices.emplace(VULKAN_DEVICE_QUEUE_TYPE_COMPUTE,
+                                             compute_family_index);
+    out_device->queue_family_indices.emplace(VULKAN_DEVICE_QUEUE_TYPE_TRANSFER,
+                                             transfer_family_index);
 
     break;
   }
 
   std::vector<uint32_t> queue_indices;
   std::set<uint32_t> unique_queue_indices;
-  if (!unique_queue_indices.contains(out_device->graphics_family_index)) {
-    queue_indices.emplace_back(out_device->graphics_family_index);
+  if (!unique_queue_indices.contains(
+          out_device
+              ->queue_family_indices[VULKAN_DEVICE_QUEUE_TYPE_GRAPHICS])) {
+    queue_indices.emplace_back(
+        out_device->queue_family_indices[VULKAN_DEVICE_QUEUE_TYPE_GRAPHICS]);
   }
-  unique_queue_indices.emplace(out_device->graphics_family_index);
+  unique_queue_indices.emplace(
+      out_device->queue_family_indices[VULKAN_DEVICE_QUEUE_TYPE_GRAPHICS]);
 
-  if (!unique_queue_indices.contains(out_device->present_family_index)) {
-    queue_indices.emplace_back(out_device->present_family_index);
+  if (!unique_queue_indices.contains(
+          out_device->queue_family_indices[VULKAN_DEVICE_QUEUE_TYPE_PRESENT])) {
+    queue_indices.emplace_back(
+        out_device->queue_family_indices[VULKAN_DEVICE_QUEUE_TYPE_PRESENT]);
   }
-  unique_queue_indices.emplace(out_device->present_family_index);
+  unique_queue_indices.emplace(
+      out_device->queue_family_indices[VULKAN_DEVICE_QUEUE_TYPE_PRESENT]);
 
-  if (!unique_queue_indices.contains(out_device->compute_family_index)) {
-    queue_indices.emplace_back(out_device->compute_family_index);
+  if (!unique_queue_indices.contains(
+          out_device->queue_family_indices[VULKAN_DEVICE_QUEUE_TYPE_COMPUTE])) {
+    queue_indices.emplace_back(
+        out_device->queue_family_indices[VULKAN_DEVICE_QUEUE_TYPE_COMPUTE]);
   }
-  unique_queue_indices.emplace(out_device->compute_family_index);
+  unique_queue_indices.emplace(
+      out_device->queue_family_indices[VULKAN_DEVICE_QUEUE_TYPE_COMPUTE]);
 
-  if (!unique_queue_indices.contains(out_device->transfer_family_index)) {
-    queue_indices.emplace_back(out_device->transfer_family_index);
+  if (!unique_queue_indices.contains(
+          out_device
+              ->queue_family_indices[VULKAN_DEVICE_QUEUE_TYPE_TRANSFER])) {
+    queue_indices.emplace_back(
+        out_device->queue_family_indices[VULKAN_DEVICE_QUEUE_TYPE_TRANSFER]);
   }
-  unique_queue_indices.emplace(out_device->transfer_family_index);
+  unique_queue_indices.emplace(
+      out_device->queue_family_indices[VULKAN_DEVICE_QUEUE_TYPE_TRANSFER]);
 
   std::vector<VkDeviceQueueCreateInfo> queue_create_infos;
   for (uint32_t i = 0; i < queue_indices.size(); ++i) {
@@ -692,9 +723,11 @@ bool createSwapchain(VulkanDevice *device, VkSurfaceKHR surface, uint32_t width,
   swapchain_create_info.imageExtent = extent;
   swapchain_create_info.imageArrayLayers = 1;
   swapchain_create_info.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
-  if (device->graphics_family_index != device->present_family_index) {
-    uint32_t indices[] = {device->graphics_family_index,
-                          device->present_family_index};
+  if (device->queue_family_indices[VULKAN_DEVICE_QUEUE_TYPE_GRAPHICS] !=
+      device->queue_family_indices[VULKAN_DEVICE_QUEUE_TYPE_PRESENT]) {
+    uint32_t indices[] = {
+        device->queue_family_indices[VULKAN_DEVICE_QUEUE_TYPE_GRAPHICS],
+        device->queue_family_indices[VULKAN_DEVICE_QUEUE_TYPE_PRESENT]};
     swapchain_create_info.imageSharingMode = VK_SHARING_MODE_CONCURRENT;
     swapchain_create_info.queueFamilyIndexCount = 2;
     swapchain_create_info.pQueueFamilyIndices = indices;
