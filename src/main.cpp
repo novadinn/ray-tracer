@@ -90,8 +90,8 @@ int main(int argc, char **argv) {
     exit(1);
   }
 
-  uint8_t image_index = 0;
-  uint8_t current_frame = 0;
+  uint32_t image_index = 0;
+  uint32_t current_frame = 0;
 
   VkApplicationInfo application_info = {};
   application_info.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
@@ -247,7 +247,128 @@ int main(int argc, char **argv) {
       } break;
       }
     }
+
+    vkDeviceWaitIdle(device.logical_device);
+    vkWaitForFences(device.logical_device, 1, &in_flight_fences[current_frame],
+                    true, UINT64_MAX);
+
+    vkAcquireNextImageKHR(device.logical_device, swapchain.handle, UINT64_MAX,
+                          image_available_semaphores[current_frame], 0,
+                          &image_index);
+
+    VkCommandBuffer graphics_command_buffer =
+        command_buffers[VULKAN_DEVICE_QUEUE_TYPE_GRAPHICS][image_index];
+    VkCommandBufferBeginInfo command_buffer_begin_info = {};
+    command_buffer_begin_info.sType =
+        VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    command_buffer_begin_info.pNext = 0;
+    command_buffer_begin_info.flags = 0;
+    command_buffer_begin_info.pInheritanceInfo = 0;
+
+    VK_CHECK(vkBeginCommandBuffer(graphics_command_buffer,
+                                  &command_buffer_begin_info));
+
+    glm::vec4 clear_color = {1, 0, 0, 1};
+    VkClearValue clear_value = {};
+    clear_value.color.float32[0] = clear_color.r;
+    clear_value.color.float32[1] = clear_color.g;
+    clear_value.color.float32[2] = clear_color.b;
+    clear_value.color.float32[3] = clear_color.a;
+
+    glm::vec4 render_area = {0, 0, window_width, window_height};
+    VkRenderPassBeginInfo render_pass_begin_info = {};
+    render_pass_begin_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+    render_pass_begin_info.pNext = 0;
+    render_pass_begin_info.renderPass = render_pass;
+    render_pass_begin_info.framebuffer = framebuffers[image_index];
+    render_pass_begin_info.renderArea.offset.x = render_area.x;
+    render_pass_begin_info.renderArea.offset.y = render_area.y;
+    render_pass_begin_info.renderArea.extent.width = render_area.z;
+    render_pass_begin_info.renderArea.extent.height = render_area.w;
+    render_pass_begin_info.clearValueCount = 1;
+    render_pass_begin_info.pClearValues = &clear_value;
+
+    vkCmdBeginRenderPass(graphics_command_buffer, &render_pass_begin_info,
+                         VK_SUBPASS_CONTENTS_INLINE);
+
+    VkViewport viewport;
+    viewport.x = 0.0f;
+    viewport.y = render_area.w;
+    viewport.width = render_area.z;
+    viewport.height = -render_area.w;
+    viewport.minDepth = 0.0f;
+    viewport.maxDepth = 1.0f;
+
+    vkCmdSetViewport(graphics_command_buffer, 0, 1, &viewport);
+
+    VkRect2D scissor;
+    scissor.offset.x = scissor.offset.y = 0;
+    scissor.extent.width = render_area.z;
+    scissor.extent.height = render_area.w;
+
+    vkCmdSetScissor(graphics_command_buffer, 0, 1, &scissor);
+
+    vkCmdEndRenderPass(graphics_command_buffer);
+
+    VK_CHECK(vkEndCommandBuffer(graphics_command_buffer));
+    /* make sure the previous frame is not using this image (its fence is
+     * being waited on) */
+    if (images_in_flight[image_index] != 0) {
+      vkWaitForFences(device.logical_device, 1, images_in_flight[image_index],
+                      true, UINT64_MAX);
+    }
+
+    /* mark the image fence as in-use by this frame */
+    images_in_flight[image_index] = &in_flight_fences[current_frame];
+    VK_CHECK(vkResetFences(device.logical_device, 1,
+                           &in_flight_fences[current_frame]));
+
+    VkPipelineStageFlags flags[1] = {
+        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
+
+    VkSubmitInfo submit_info = {};
+    submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submit_info.pNext = 0;
+    submit_info.waitSemaphoreCount = 1;
+    submit_info.pWaitSemaphores = &image_available_semaphores[current_frame];
+    submit_info.pWaitDstStageMask = 0;
+    submit_info.commandBufferCount = 1;
+    submit_info.pCommandBuffers = &graphics_command_buffer;
+    submit_info.signalSemaphoreCount = 1;
+    submit_info.pSignalSemaphores = &queue_complete_semaphores[current_frame];
+    submit_info.pWaitDstStageMask = flags;
+
+    VkQueue graphics_queue = queues[VULKAN_DEVICE_QUEUE_TYPE_GRAPHICS];
+
+    VkResult result = vkQueueSubmit(graphics_queue, 1, &submit_info,
+                                    in_flight_fences[current_frame]);
+    if (result != VK_SUCCESS) {
+      ERROR("Vulkan queue submit failed.");
+    }
+
+    VkPresentInfoKHR present_info = {};
+    present_info.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+    present_info.pNext = 0;
+    present_info.waitSemaphoreCount = 1;
+    present_info.pWaitSemaphores = &queue_complete_semaphores[current_frame];
+    present_info.swapchainCount = 1;
+    present_info.pSwapchains = &swapchain.handle;
+    present_info.pImageIndices = &image_index;
+    present_info.pResults = 0;
+
+    VkQueue present_queue = queues[VULKAN_DEVICE_QUEUE_TYPE_PRESENT];
+
+    result = vkQueuePresentKHR(present_queue, &present_info);
+    if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) {
+      /* TODO: recreate a swapchain */
+    } else if (result != VK_SUCCESS) {
+      ERROR("Failed to present a swapchain image!");
+    }
+
+    current_frame = (current_frame + 1) % swapchain.max_frames_in_flight;
   }
+
+  vkDeviceWaitIdle(device.logical_device);
 
   for (auto it = command_buffers.begin(); it != command_buffers.end(); it++) {
     std::vector<VkCommandBuffer> &command_buffers = it->second;
