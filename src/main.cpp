@@ -4,6 +4,7 @@
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_vulkan.h>
 #include <assert.h>
+#include <set>
 #include <stdint.h>
 #include <string.h>
 #include <vector>
@@ -16,6 +17,11 @@ struct VulkanDevice {
   VkPhysicalDeviceProperties properties;
   VkPhysicalDeviceFeatures features;
   VkPhysicalDeviceMemoryProperties memory;
+
+  uint32_t graphics_family_index = 0;
+  uint32_t present_family_index = 0;
+  uint32_t compute_family_index = 0;
+  uint32_t transfer_family_index = 0;
 };
 
 #define VK_CHECK(result)                                                       \
@@ -40,7 +46,8 @@ bool createSurface(SDL_Window *window, VkInstance instance,
                    VkSurfaceKHR *out_surface);
 bool deviceExtensionsAvailable(VkPhysicalDevice physical_device,
                                std::vector<const char *> required_extensions);
-bool createDevice(VkInstance instance, VulkanDevice *out_device);
+bool createDevice(VkInstance instance, VkSurfaceKHR surface,
+                  VulkanDevice *out_device);
 
 int main(int argc, char **argv) {
   SDL_Window *window;
@@ -93,10 +100,23 @@ int main(int argc, char **argv) {
   }
 
   VulkanDevice device;
-  if (!createDevice(instance, &device)) {
+  if (!createDevice(instance, surface, &device)) {
     FATAL("Failed to create vulkan device!");
     exit(1);
   }
+
+  VkQueue graphics_queue;
+  vkGetDeviceQueue(device.logical_device, device.graphics_family_index, 0,
+                   &graphics_queue);
+  VkQueue present_queue;
+  vkGetDeviceQueue(device.logical_device, device.present_family_index, 0,
+                   &present_queue);
+  VkQueue compute_queue;
+  vkGetDeviceQueue(device.logical_device, device.compute_family_index, 0,
+                   &compute_queue);
+  VkQueue transfer_queue;
+  vkGetDeviceQueue(device.logical_device, device.transfer_family_index, 0,
+                   &transfer_queue);
 
   bool running = true;
   while (running) {
@@ -300,7 +320,8 @@ bool createSurface(SDL_Window *window, VkInstance instance,
   return true;
 }
 
-bool createDevice(VkInstance instance, VulkanDevice *out_device) {
+bool createDevice(VkInstance instance, VkSurfaceKHR surface,
+                  VulkanDevice *out_device) {
   std::vector<VkPhysicalDevice> physical_devices;
   uint32_t physical_device_count = 0;
   VK_CHECK(vkEnumeratePhysicalDevices(instance, &physical_device_count, 0));
@@ -323,6 +344,64 @@ bool createDevice(VkInstance instance, VulkanDevice *out_device) {
       return false;
     }
 
+    std::vector<VkQueueFamilyProperties> queue_family_properties;
+    uint32_t queue_family_count;
+    vkGetPhysicalDeviceQueueFamilyProperties(current_physical_device,
+                                             &queue_family_count, 0);
+    queue_family_properties.resize(queue_family_count);
+    vkGetPhysicalDeviceQueueFamilyProperties(current_physical_device,
+                                             &queue_family_count,
+                                             &queue_family_properties[0]);
+
+    int32_t graphics_family_index = -1;
+    int32_t present_family_index = -1;
+    int32_t compute_family_index = -1;
+    int32_t transfer_family_index = -1;
+    for (uint32_t j = 0; j < queue_family_count; ++j) {
+      VkQueueFamilyProperties queue_properties = queue_family_properties[j];
+
+      if (queue_properties.queueFlags & VK_QUEUE_GRAPHICS_BIT) {
+        graphics_family_index = j;
+
+        VkBool32 supports_present = VK_FALSE;
+        VK_CHECK(vkGetPhysicalDeviceSurfaceSupportKHR(
+            current_physical_device, j, surface, &supports_present));
+        if (supports_present) {
+          present_family_index = j;
+        }
+      }
+
+      if (queue_properties.queueFlags & VK_QUEUE_TRANSFER_BIT) {
+        transfer_family_index = j;
+      }
+
+      if (queue_properties.queueFlags & VK_QUEUE_COMPUTE_BIT) {
+        compute_family_index = j;
+      }
+
+      /* attempting to find a transfer-only queue (can be used for multithreaded
+       * transfer operations) */
+      for (uint32_t k = 0; k < queue_family_count; ++k) {
+        VkQueueFamilyProperties queue_properties = queue_family_properties[k];
+
+        if ((queue_properties.queueFlags & VK_QUEUE_TRANSFER_BIT) &&
+            !(queue_properties.queueFlags & VK_QUEUE_GRAPHICS_BIT) &&
+            !(queue_properties.queueFlags & VK_QUEUE_COMPUTE_BIT) &&
+            !(queue_properties.queueFlags & VK_QUEUE_TRANSFER_BIT) &&
+            !(queue_properties.queueFlags & VK_QUEUE_SPARSE_BINDING_BIT) &&
+            !(queue_properties.queueFlags & VK_QUEUE_PROTECTED_BIT) &&
+            !(queue_properties.queueFlags & VK_QUEUE_VIDEO_DECODE_BIT_KHR) &&
+            !(queue_properties.queueFlags & VK_QUEUE_OPTICAL_FLOW_BIT_NV)) {
+          transfer_family_index = k;
+        }
+      }
+    }
+
+    if (graphics_family_index == -1 || present_family_index == -1 ||
+        transfer_family_index == -1 || compute_family_index == -1) {
+      return false;
+    }
+
     VkPhysicalDeviceProperties device_properties;
     vkGetPhysicalDeviceProperties(current_physical_device, &device_properties);
     VkPhysicalDeviceFeatures device_features;
@@ -335,8 +414,48 @@ bool createDevice(VkInstance instance, VulkanDevice *out_device) {
     out_device->properties = device_properties;
     out_device->features = device_features;
     out_device->memory = device_memory;
+    out_device->graphics_family_index = graphics_family_index;
+    out_device->present_family_index = present_family_index;
+    out_device->compute_family_index = compute_family_index;
+    out_device->transfer_family_index = transfer_family_index;
 
     break;
+  }
+
+  std::vector<uint32_t> queue_indices;
+  std::set<uint32_t> unique_queue_indices;
+  if (!unique_queue_indices.contains(out_device->graphics_family_index)) {
+    queue_indices.emplace_back(out_device->graphics_family_index);
+  }
+  unique_queue_indices.emplace(out_device->graphics_family_index);
+
+  if (!unique_queue_indices.contains(out_device->present_family_index)) {
+    queue_indices.emplace_back(out_device->present_family_index);
+  }
+  unique_queue_indices.emplace(out_device->present_family_index);
+
+  if (!unique_queue_indices.contains(out_device->compute_family_index)) {
+    queue_indices.emplace_back(out_device->compute_family_index);
+  }
+  unique_queue_indices.emplace(out_device->compute_family_index);
+
+  if (!unique_queue_indices.contains(out_device->transfer_family_index)) {
+    queue_indices.emplace_back(out_device->transfer_family_index);
+  }
+  unique_queue_indices.emplace(out_device->transfer_family_index);
+
+  std::vector<VkDeviceQueueCreateInfo> queue_create_infos;
+  for (int i = 0; i < queue_indices.size(); ++i) {
+    float queue_priority = 1.0f;
+    VkDeviceQueueCreateInfo queue_create_info = {};
+    queue_create_info.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+    queue_create_info.pNext = 0;
+    queue_create_info.flags = 0;
+    queue_create_info.queueFamilyIndex = queue_indices[i];
+    queue_create_info.queueCount = 1;
+    queue_create_info.pQueuePriorities = &queue_priority;
+
+    queue_create_infos.emplace_back(queue_create_info);
   }
 
   std::vector<const char *> required_extension_names;
@@ -351,8 +470,8 @@ bool createDevice(VkInstance instance, VulkanDevice *out_device) {
   device_create_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
   device_create_info.pNext = 0;
   device_create_info.flags = 0;
-  device_create_info.queueCreateInfoCount = 0;
-  device_create_info.pQueueCreateInfos = 0;
+  device_create_info.queueCreateInfoCount = queue_create_infos.size();
+  device_create_info.pQueueCreateInfos = queue_create_infos.data();
   device_create_info.enabledLayerCount = 0;   /* deprecated */
   device_create_info.ppEnabledLayerNames = 0; /* deprecated */
   device_create_info.enabledExtensionCount = required_extension_names.size();
