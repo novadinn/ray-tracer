@@ -63,6 +63,9 @@ bool createSwapchain(VulkanDevice *device, VkSurfaceKHR surface, uint32_t width,
 void destroySwapchain(VulkanSwapchain *swapchain, VulkanDevice *device);
 bool createRenderPass(VulkanDevice *device, VulkanSwapchain *swapchain,
                       VkRenderPass *out_render_pass);
+bool createFramebuffer(VulkanDevice *device, VkRenderPass render_pass,
+                       std::vector<VkImageView> attachments, uint32_t width,
+                       uint32_t height, VkFramebuffer *out_framebuffer);
 
 int main(int argc, char **argv) {
   SDL_Window *window;
@@ -71,9 +74,12 @@ int main(int argc, char **argv) {
     exit(1);
   }
 
-  window = SDL_CreateWindow("Ray tracer", SDL_WINDOWPOS_UNDEFINED,
-                            SDL_WINDOWPOS_UNDEFINED, 800, 600,
-                            SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE);
+  const uint32_t window_width = 800;
+  const uint32_t window_height = 600;
+
+  window = SDL_CreateWindow(
+      "Ray tracer", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED,
+      window_width, window_height, SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE);
   if (!window) {
     FATAL("Failed to create a window!");
     exit(1);
@@ -134,7 +140,8 @@ int main(int argc, char **argv) {
                    &transfer_queue);
 
   VulkanSwapchain swapchain;
-  if (!createSwapchain(&device, surface, 800, 600, &swapchain)) {
+  if (!createSwapchain(&device, surface, window_width, window_height,
+                       &swapchain)) {
     FATAL("Failed to create a swapchain!");
     exit(1);
   }
@@ -143,6 +150,17 @@ int main(int argc, char **argv) {
   if (!createRenderPass(&device, &swapchain, &render_pass)) {
     FATAL("Failed to create a render pass!");
     exit(1);
+  }
+
+  std::vector<VkFramebuffer> framebuffers;
+  framebuffers.resize(swapchain.images.size());
+  for (int i = 0; i < framebuffers.size(); ++i) {
+    if (!createFramebuffer(&device, render_pass,
+                           std::vector<VkImageView>{swapchain.image_views[i]},
+                           window_width, window_height, &framebuffers[i])) {
+      FATAL("Failed to create a framebuffer!");
+      exit(1);
+    }
   }
 
   bool running = true;
@@ -166,6 +184,9 @@ int main(int argc, char **argv) {
     }
   }
 
+  for (int i = 0; i < framebuffers.size(); ++i) {
+    vkDestroyFramebuffer(device.logical_device, framebuffers[i], 0);
+  }
   vkDestroyRenderPass(device.logical_device, render_pass, 0);
   destroySwapchain(&swapchain, &device);
   destroyDevice(&device);
@@ -757,6 +778,26 @@ bool createRenderPass(VulkanDevice *device, VulkanSwapchain *swapchain,
 
   VK_CHECK(vkCreateRenderPass(device->logical_device, &render_pass_create_info,
                               0, out_render_pass));
+
+  return true;
+}
+
+bool createFramebuffer(VulkanDevice *device, VkRenderPass render_pass,
+                       std::vector<VkImageView> attachments, uint32_t width,
+                       uint32_t height, VkFramebuffer *out_framebuffer) {
+  VkFramebufferCreateInfo framebuffer_create_info = {};
+  framebuffer_create_info.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+  framebuffer_create_info.pNext = 0;
+  framebuffer_create_info.flags = 0;
+  framebuffer_create_info.renderPass = render_pass;
+  framebuffer_create_info.attachmentCount = attachments.size();
+  framebuffer_create_info.pAttachments = attachments.data();
+  framebuffer_create_info.width = width;
+  framebuffer_create_info.height = height;
+  framebuffer_create_info.layers = 1;
+
+  VK_CHECK(vkCreateFramebuffer(device->logical_device, &framebuffer_create_info,
+                               0, out_framebuffer));
 
   return true;
 }
