@@ -2,6 +2,7 @@
 
 #include "logger.h"
 #include "vulkan_common.h"
+#include "platform.h"
 
 #include <set>
 #include <string.h>
@@ -27,6 +28,9 @@ bool createDevice(VkInstance instance, VkSurfaceKHR surface,
 
     std::vector<const char *> device_extension_names;
     device_extension_names.emplace_back(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
+#ifdef PLATFORM_APPLE
+    device_extension_names.emplace_back("VK_KHR_portability_subset");
+#endif
 
     if (!deviceExtensionsAvailable(current_physical_device,
                                    device_extension_names)) {
