@@ -20,5 +20,3 @@ bool createTexture(VulkanDevice *device, VmaAllocator vma_allocator,
                    VulkanTexture *out_texture);
 void destroyTexture(VulkanTexture *texture, VulkanDevice *device,
                     VmaAllocator vma_allocator);
-
-void writeTextureData(VulkanTexture *texture, void *pixels, uint32_t offset);

@@ -37,7 +37,7 @@ include_directories(
   vendor/VulkanMemoryAllocator/include
 )
 
-add_executable(${PROJECT_NAME} src/main.cpp src/logger.cpp src/vulkan_swapchain.cpp src/vulkan_device.cpp src/vulkan_texture.cpp)
+add_executable(${PROJECT_NAME} src/main.cpp src/logger.cpp src/vulkan_swapchain.cpp src/vulkan_device.cpp src/vulkan_texture.cpp src/vulkan_buffer.cpp src/vulkan_resources.cpp)
 
 target_link_directories(
   ${PROJECT_NAME} PRIVATE

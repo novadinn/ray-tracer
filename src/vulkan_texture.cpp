@@ -5,11 +5,6 @@
 
 #include "vulkan_buffer.h"
 
-void transitionLayout(VulkanTexture *texture, VkImageLayout old_layout,
-                      VkImageLayout new_layout);
-void copyFromBuffer(VulkanTexture *texture, VkCommandBuffer command_buffer,
-                    uint64_t offset);
-
 bool createTexture(VulkanDevice *device, VmaAllocator vma_allocator,
                    VkFormat format, uint32_t width, uint32_t height,
                    VulkanTexture *out_texture) {
@@ -98,96 +93,7 @@ bool createTexture(VulkanDevice *device, VmaAllocator vma_allocator,
 
 void destroyTexture(VulkanTexture *texture, VulkanDevice *device,
                     VmaAllocator vma_allocator) {
-  vkDeviceWaitIdle(device->logical_device);
-
   vkDestroySampler(device->logical_device, texture->sampler, 0);
   vkDestroyImageView(device->logical_device, texture->view, 0);
   vmaDestroyImage(vma_allocator, texture->handle, texture->memory);
-}
-
-void writeTextureData(VulkanTexture *texture, void *pixels, uint32_t offset) {
-  /* TODO: instead of 3, determine the number of channels from texture->format
-   */
-  uint32_t size = texture->width * texture->height * 3;
-}
-
-void transitionLayout(VulkanTexture *texture, uint32_t family_index,
-                      VkCommandBuffer command_buffer, VkImageLayout old_layout,
-                      VkImageLayout new_layout) {
-  VkImageMemoryBarrier barrier = {VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
-  barrier.oldLayout = old_layout;
-  barrier.newLayout = new_layout;
-  barrier.srcQueueFamilyIndex = family_index;
-  barrier.dstQueueFamilyIndex = family_index;
-  barrier.image = texture->handle;
-  barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-  barrier.subresourceRange.baseMipLevel = 0;
-  barrier.subresourceRange.levelCount = 1;
-  barrier.subresourceRange.baseArrayLayer = 0;
-  barrier.subresourceRange.layerCount = 1;
-
-  VkPipelineStageFlags source_stage;
-  VkPipelineStageFlags dest_stage;
-
-  if (old_layout == VK_IMAGE_LAYOUT_UNDEFINED &&
-      new_layout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL) {
-    barrier.srcAccessMask = 0;
-    barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-
-    source_stage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
-
-    dest_stage = VK_PIPELINE_STAGE_TRANSFER_BIT;
-  } else if (old_layout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL &&
-             new_layout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
-    barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-    barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-
-    source_stage = VK_PIPELINE_STAGE_TRANSFER_BIT;
-
-    dest_stage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
-  } else if (old_layout == VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL &&
-             new_layout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
-    barrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-    barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-
-    source_stage = VK_PIPELINE_STAGE_TRANSFER_BIT;
-
-    dest_stage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
-  } else if (old_layout == VK_IMAGE_LAYOUT_UNDEFINED &&
-             new_layout == VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL) {
-    barrier.srcAccessMask = 0;
-    barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-
-    source_stage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
-
-    dest_stage = VK_PIPELINE_STAGE_TRANSFER_BIT;
-  } else {
-    ERROR("Unsupported layout transition!");
-    return;
-  }
-
-  vkCmdPipelineBarrier(command_buffer, source_stage, dest_stage, 0, 0, 0, 0, 0,
-                       1, &barrier);
-}
-
-void copyFromBuffer(VulkanTexture *texture, VulkanBuffer *buffer,
-                    VkCommandBuffer command_buffer) {
-  VkBufferImageCopy buffer_image_copy = {};
-  buffer_image_copy.bufferOffset = 0;
-  buffer_image_copy.bufferRowLength = 0;
-  buffer_image_copy.bufferImageHeight = 0;
-  buffer_image_copy.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-  buffer_image_copy.imageSubresource.mipLevel = 0;
-  buffer_image_copy.imageSubresource.baseArrayLayer = 0;
-  buffer_image_copy.imageSubresource.layerCount = 1;
-  buffer_image_copy.imageOffset.x = 0;
-  buffer_image_copy.imageOffset.y = 0;
-  buffer_image_copy.imageOffset.z = 0;
-  buffer_image_copy.imageExtent.width = texture->width;
-  buffer_image_copy.imageExtent.height = texture->height;
-  buffer_image_copy.imageExtent.depth = 1;
-
-  vkCmdCopyBufferToImage(command_buffer, buffer->handle, texture->handle,
-                         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1,
-                         &buffer_image_copy);
 }

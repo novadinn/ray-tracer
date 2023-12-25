@@ -3,6 +3,7 @@
 #include "vulkan_common.h"
 #include "vulkan_device.h"
 #include "vulkan_swapchain.h"
+#include "vulkan_resources.h"
 
 #include "glm/glm.hpp"
 #include <SDL2/SDL.h>
@@ -39,12 +40,6 @@ bool createRenderPass(VulkanDevice *device, VulkanSwapchain *swapchain,
 bool createFramebuffer(VulkanDevice *device, VkRenderPass render_pass,
                        std::vector<VkImageView> attachments, uint32_t width,
                        uint32_t height, VkFramebuffer *out_framebuffer);
-bool createCommandPool(VulkanDevice *device, uint32_t queue_family_index,
-                       VkCommandPool *out_command_pool);
-bool allocateCommandBuffer(VulkanDevice *device, VkCommandPool command_pool,
-                           VkCommandBuffer *out_command_buffer);
-bool createSemaphore(VulkanDevice *device, VkSemaphore *out_semaphore);
-bool createFence(VulkanDevice *device, VkFence *out_fence);
 
 int main(int argc, char **argv) {
   SDL_Window *window;
@@ -217,15 +212,7 @@ int main(int argc, char **argv) {
 
     VkCommandBuffer graphics_command_buffer =
         command_buffers[VULKAN_DEVICE_QUEUE_TYPE_GRAPHICS][image_index];
-    VkCommandBufferBeginInfo command_buffer_begin_info = {};
-    command_buffer_begin_info.sType =
-        VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    command_buffer_begin_info.pNext = 0;
-    command_buffer_begin_info.flags = 0;
-    command_buffer_begin_info.pInheritanceInfo = 0;
-
-    VK_CHECK(vkBeginCommandBuffer(graphics_command_buffer,
-                                  &command_buffer_begin_info));
+    beginCommandBuffer(graphics_command_buffer, 0);
 
     glm::vec4 clear_color = {1, 0, 0, 1};
     VkClearValue clear_value = {};
@@ -270,6 +257,7 @@ int main(int argc, char **argv) {
     vkCmdEndRenderPass(graphics_command_buffer);
 
     VK_CHECK(vkEndCommandBuffer(graphics_command_buffer));
+
     /* make sure the previous frame is not using this image (its fence is
      * being waited on) */
     if (images_in_flight[image_index] != 0) {
@@ -602,62 +590,6 @@ bool createFramebuffer(VulkanDevice *device, VkRenderPass render_pass,
 
   VK_CHECK(vkCreateFramebuffer(device->logical_device, &framebuffer_create_info,
                                0, out_framebuffer));
-
-  return true;
-}
-
-bool createCommandPool(VulkanDevice *device, uint32_t queue_family_index,
-                       VkCommandPool *out_command_pool) {
-  VkCommandPoolCreateInfo command_pool_create_info = {};
-  command_pool_create_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-  command_pool_create_info.pNext = 0;
-  command_pool_create_info.flags =
-      VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-  command_pool_create_info.queueFamilyIndex = queue_family_index;
-
-  VK_CHECK(vkCreateCommandPool(device->logical_device,
-                               &command_pool_create_info, 0, out_command_pool));
-
-  return true;
-}
-
-bool allocateCommandBuffer(VulkanDevice *device, VkCommandPool command_pool,
-                           VkCommandBuffer *out_command_buffer) {
-  VkCommandBufferAllocateInfo command_buffer_allocate_info = {};
-  command_buffer_allocate_info.sType =
-      VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-  command_buffer_allocate_info.pNext = 0;
-  command_buffer_allocate_info.commandPool = command_pool;
-  command_buffer_allocate_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-  command_buffer_allocate_info.commandBufferCount = 1;
-
-  VK_CHECK(vkAllocateCommandBuffers(device->logical_device,
-                                    &command_buffer_allocate_info,
-                                    out_command_buffer));
-
-  return true;
-}
-
-bool createSemaphore(VulkanDevice *device, VkSemaphore *out_semaphore) {
-  VkSemaphoreCreateInfo semaphore_create_info = {};
-  semaphore_create_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
-  semaphore_create_info.pNext = 0;
-  semaphore_create_info.flags = 0;
-
-  VK_CHECK(vkCreateSemaphore(device->logical_device, &semaphore_create_info, 0,
-                             out_semaphore));
-
-  return true;
-}
-
-bool createFence(VulkanDevice *device, VkFence *out_fence) {
-  VkFenceCreateInfo fence_create_info = {};
-  fence_create_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-  fence_create_info.pNext = 0;
-  fence_create_info.flags = VK_FENCE_CREATE_SIGNALED_BIT;
-
-  VK_CHECK(
-      vkCreateFence(device->logical_device, &fence_create_info, 0, out_fence));
 
   return true;
 }
