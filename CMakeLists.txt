@@ -34,9 +34,10 @@ include_directories(
   ${SDL2_INCLUDE_DIRS}
   ${ASSIMP_INCLUDE_DIR}
   vendor/glm
+  vendor/VulkanMemoryAllocator/include
 )
 
-add_executable(${PROJECT_NAME} src/main.cpp src/logger.cpp src/vulkan_swapchain.cpp src/vulkan_device.cpp)
+add_executable(${PROJECT_NAME} src/main.cpp src/logger.cpp src/vulkan_swapchain.cpp src/vulkan_device.cpp src/vulkan_texture.cpp)
 
 target_link_directories(
   ${PROJECT_NAME} PRIVATE

@@ -14,6 +14,8 @@
 #include <unordered_map>
 #include <vector>
 #include <vulkan/vulkan.h>
+#define VMA_IMPLEMENTATION
+#include "vk_mem_alloc.h"
 
 #if PLATFORM_APPLE == 1
 #define VK_ENABLE_BETA_EXTENSIONS

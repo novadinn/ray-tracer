@@ -1,3 +1,6 @@
 [submodule "vendor/glm"]
 	path = vendor/glm
 	url = git@github.com:g-truc/glm.git
+[submodule "vendor/VulkanMemoryAllocator"]
+	path = vendor/VulkanMemoryAllocator
+	url = git@github.com:GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator.git
