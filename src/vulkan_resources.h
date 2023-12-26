@@ -30,3 +30,6 @@ bool createDescriptorSetLayout(
     VulkanDevice *device,
     std::vector<VkDescriptorSetLayoutBinding> descriptor_set_layout_bindings,
     VkDescriptorSetLayout *out_descriptor_set_layout);
+
+bool createDescriptorPool(VulkanDevice *device, VkDescriptorPool *out_descriptor_pool);
+bool allocateDescriptorSet(VulkanDevice *device, VkDescriptorPool descriptor_pool, VkDescriptorSetLayout layout, VkDescriptorSet *out_descriptor_set);

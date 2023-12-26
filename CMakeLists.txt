@@ -78,7 +78,7 @@ foreach(GLSL ${VK_GLSL_SOURCE_FILES})
   add_custom_command(
     OUTPUT ${SPIRV}
     COMMAND ${CMAKE_COMMAND} -E make_directory "${PROJECT_BINARY_DIR}/bin/assets/shaders/"
-    COMMAND ${GLSLANG} --target-env vulkan1.3 ${GLSL} -o ${SPIRV}
+    COMMAND ${GLSLANG} --target-env vulkan1.2 ${GLSL} -o ${SPIRV}
     DEPENDS ${GLSL})
   list(APPEND SPIRV_BINARY_FILES ${SPIRV})
 endforeach(GLSL)

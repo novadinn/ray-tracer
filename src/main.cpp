@@ -183,6 +183,12 @@ int main(int argc, char **argv) {
     images_in_flight[i] = 0;
   }
 
+  VkDescriptorPool descriptor_pool;
+  if(!createDescriptorPool(&device, &descriptor_pool)) {
+    FATAL("Failed to create a descriptor pool!");
+    exit(1);
+  }
+
   VkShaderModule texture_vertex_shader_module;
   if (!createShaderModule(&device, "assets/shaders/texture.vert.spv",
                           &texture_vertex_shader_module)) {
@@ -210,7 +216,7 @@ int main(int argc, char **argv) {
                                      descriptor_set_layout_binding},
                                  &descriptor_set_layout)) {
     FATAL("Failed to create a descriptor set layout!");
-    return false;
+    exit(1);
   }
 
   std::vector<VkPipelineShaderStageCreateInfo> graphics_pipeline_stages;
@@ -244,6 +250,12 @@ int main(int argc, char **argv) {
   vkDestroyShaderModule(device.logical_device, texture_vertex_shader_module, 0);
   vkDestroyShaderModule(device.logical_device, texture_fragment_shader_module,
                         0);
+
+  VkDescriptorSet texture_descriptor_set;
+  if(!allocateDescriptorSet(&device, descriptor_pool, descriptor_set_layout, &texture_descriptor_set)) {
+    FATAL("Failed to create a descriptor set!");
+    exit(1);
+  }
 
   bool running = true;
   while (running) {
@@ -379,6 +391,8 @@ int main(int argc, char **argv) {
   }
 
   vkDeviceWaitIdle(device.logical_device);
+
+  vkDestroyDescriptorPool(device.logical_device, descriptor_pool, 0);
 
   destroyPipeline(&graphics_pipeline, &device);
 

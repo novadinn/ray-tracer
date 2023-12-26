@@ -159,3 +159,52 @@ bool createDescriptorSetLayout(
 
   return true;
 }
+
+bool createDescriptorPool(VulkanDevice *device, VkDescriptorPool *out_descriptor_pool) {
+  const uint32_t size_count = 1000;
+  const std::vector<std::pair<VkDescriptorType, float>> pool_sizes = {
+      {VK_DESCRIPTOR_TYPE_SAMPLER, 0.5f},
+      {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 4.f},
+      {VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 4.f},
+      {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1.f},
+      {VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER, 1.f},
+      {VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER, 1.f},
+      {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 2.f},
+      {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 2.f},
+      {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 1.f},
+      {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC, 1.f},
+      {VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT, 0.5f}};
+
+  std::vector<VkDescriptorPoolSize> sizes;
+  sizes.reserve(pool_sizes.size());
+  for (auto size : pool_sizes) {
+    sizes.push_back({size.first, uint32_t(size.second * size_count)});
+  }
+
+  VkDescriptorPoolCreateInfo descriptor_pool_create_info = {};
+  descriptor_pool_create_info.sType =
+      VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+  descriptor_pool_create_info.flags = 0;
+  descriptor_pool_create_info.maxSets = size_count;
+  descriptor_pool_create_info.poolSizeCount = sizes.size();
+  descriptor_pool_create_info.pPoolSizes = sizes.data();
+
+  VK_CHECK(vkCreateDescriptorPool(device->logical_device,
+                                  &descriptor_pool_create_info,
+                                  0, out_descriptor_pool));
+
+  return true;
+}
+
+bool allocateDescriptorSet(VulkanDevice *device, VkDescriptorPool descriptor_pool, VkDescriptorSetLayout layout, VkDescriptorSet *out_descriptor_set) {
+  VkDescriptorSetAllocateInfo descriptor_set_allocate_info = {};
+  descriptor_set_allocate_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+  descriptor_set_allocate_info.pNext = 0;
+  descriptor_set_allocate_info.descriptorPool = descriptor_pool;
+  descriptor_set_allocate_info.descriptorSetCount = 1;
+  descriptor_set_allocate_info.pSetLayouts = &layout;
+
+  VK_CHECK(vkAllocateDescriptorSets(device->logical_device, &descriptor_set_allocate_info, out_descriptor_set));
+
+  return true;
+}
