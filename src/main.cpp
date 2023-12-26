@@ -5,6 +5,8 @@
 #include "vulkan_pipeline.h"
 #include "vulkan_resources.h"
 #include "vulkan_swapchain.h"
+#include "vulkan_texture.h"
+#include "vulkan_buffer.h"
 
 #include "glm/glm.hpp"
 #include <SDL2/SDL.h>
@@ -43,6 +45,7 @@ bool createFramebuffer(VulkanDevice *device, VkRenderPass render_pass,
                        uint32_t height, VkFramebuffer *out_framebuffer);
 VkDescriptorSetLayoutBinding descriptorSetLayoutBinding(uint32_t binding, VkDescriptorType descriptor_type, VkShaderStageFlags shader_stage_flags);
 VkPipelineShaderStageCreateInfo pipelineShaderStageCreateInfo(VkShaderStageFlagBits stage_flag, VkShaderModule shader_module);
+void writeDescriptorSet(VulkanDevice *device, VkDescriptorSet descriptor_set, uint32_t binding, VkDescriptorType descriptor_type, VkDescriptorImageInfo *image_info, VkDescriptorBufferInfo *buffer_info);
 
 int main(int argc, char **argv) {
   SDL_Window *window;
@@ -102,6 +105,22 @@ int main(int argc, char **argv) {
     FATAL("Failed to create vulkan device!");
     exit(1);
   }
+
+  VmaAllocator vma_allocator;
+
+  VmaAllocatorCreateInfo vma_allocator_create_info = {};
+  vma_allocator_create_info.flags = 0;
+  vma_allocator_create_info.physicalDevice = device.physical_device;
+  vma_allocator_create_info.device = device.logical_device;
+  /* vma_allocator_create_info.preferredLargeHeapBlockSize; */
+  vma_allocator_create_info.pAllocationCallbacks = 0;
+  /* vma_allocator_create_info.pDeviceMemoryCallbacks; */
+  /* vma_allocator_create_info.pHeapSizeLimit; */
+  /* vma_allocator_create_info.pVulkanFunctions; */
+  vma_allocator_create_info.instance = instance;
+  vma_allocator_create_info.vulkanApiVersion = application_info.apiVersion;
+  VK_CHECK(
+      vmaCreateAllocator(&vma_allocator_create_info, &vma_allocator));
 
   VulkanSwapchain swapchain;
   if (!createSwapchain(&device, surface, window_width, window_height,
@@ -238,6 +257,18 @@ int main(int argc, char **argv) {
     exit(1);
   }
 
+  VulkanTexture texture;
+  if(!createTexture(&device, vma_allocator, VK_FORMAT_R8G8B8A8_SRGB, window_width, window_height, &texture)) {
+    FATAL("Failed to create a texture!");
+    exit(1);
+  }
+
+  VkDescriptorImageInfo descriptor_image_info = {};
+  descriptor_image_info.sampler = texture.sampler;
+  descriptor_image_info.imageView = texture.view;
+  descriptor_image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+  writeDescriptorSet(&device, texture_descriptor_set, 0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, &descriptor_image_info, 0);
+
   bool running = true;
   while (running) {
     SDL_Event event;
@@ -372,6 +403,8 @@ int main(int argc, char **argv) {
   }
 
   vkDeviceWaitIdle(device.logical_device);
+
+  destroyTexture(&texture, &device, vma_allocator);
 
   vkDestroyDescriptorPool(device.logical_device, descriptor_pool, 0);
 
@@ -680,4 +713,21 @@ VkPipelineShaderStageCreateInfo pipelineShaderStageCreateInfo(VkShaderStageFlagB
   pipeline_shader_stage_create_info.pSpecializationInfo = 0;
 
   return pipeline_shader_stage_create_info;
+}
+
+void writeDescriptorSet(VulkanDevice *device, VkDescriptorSet descriptor_set, uint32_t binding, VkDescriptorType descriptor_type, VkDescriptorImageInfo *image_info, VkDescriptorBufferInfo *buffer_info) {
+  VkWriteDescriptorSet write_descriptor_set = {};
+  write_descriptor_set.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+  write_descriptor_set.pNext = 0;
+  write_descriptor_set.dstSet = descriptor_set;
+  write_descriptor_set.dstBinding = binding;
+  write_descriptor_set.dstArrayElement = 0;
+  write_descriptor_set.descriptorCount = 1;
+  write_descriptor_set.descriptorType = descriptor_type;
+  write_descriptor_set.pImageInfo = image_info;
+  write_descriptor_set.pBufferInfo = buffer_info;
+  write_descriptor_set.pTexelBufferView = 0;
+
+  vkUpdateDescriptorSets(device->logical_device, 1,
+                         &write_descriptor_set, 0, 0);
 }
