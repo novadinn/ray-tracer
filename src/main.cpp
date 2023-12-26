@@ -41,6 +41,8 @@ bool createRenderPass(VulkanDevice *device, VulkanSwapchain *swapchain,
 bool createFramebuffer(VulkanDevice *device, VkRenderPass render_pass,
                        std::vector<VkImageView> attachments, uint32_t width,
                        uint32_t height, VkFramebuffer *out_framebuffer);
+VkDescriptorSetLayoutBinding descriptorSetLayoutBinding(uint32_t binding, VkDescriptorType descriptor_type, VkShaderStageFlags shader_stage_flags);
+VkPipelineShaderStageCreateInfo pipelineShaderStageCreateInfo(VkShaderStageFlagBits stage_flag, VkShaderModule shader_module);
 
 int main(int argc, char **argv) {
   SDL_Window *window;
@@ -202,13 +204,7 @@ int main(int argc, char **argv) {
     exit(1);
   }
 
-  VkDescriptorSetLayoutBinding descriptor_set_layout_binding = {};
-  descriptor_set_layout_binding.binding = 0;
-  descriptor_set_layout_binding.descriptorType =
-      VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-  descriptor_set_layout_binding.descriptorCount = 1;
-  descriptor_set_layout_binding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-  descriptor_set_layout_binding.pImmutableSamplers = 0;
+  VkDescriptorSetLayoutBinding descriptor_set_layout_binding = descriptorSetLayoutBinding(0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT);
 
   VkDescriptorSetLayout descriptor_set_layout;
   if (!createDescriptorSetLayout(&device,
@@ -220,23 +216,8 @@ int main(int argc, char **argv) {
   }
 
   std::vector<VkPipelineShaderStageCreateInfo> graphics_pipeline_stages;
-  graphics_pipeline_stages.resize(2);
-  graphics_pipeline_stages[0].sType =
-      VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-  graphics_pipeline_stages[0].pNext = 0;
-  graphics_pipeline_stages[0].flags = 0;
-  graphics_pipeline_stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
-  graphics_pipeline_stages[0].module = texture_vertex_shader_module;
-  graphics_pipeline_stages[0].pName = "main";
-  graphics_pipeline_stages[0].pSpecializationInfo = 0;
-  graphics_pipeline_stages[1].sType =
-      VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-  graphics_pipeline_stages[1].pNext = 0;
-  graphics_pipeline_stages[1].flags = 0;
-  graphics_pipeline_stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-  graphics_pipeline_stages[1].module = texture_fragment_shader_module;
-  graphics_pipeline_stages[1].pName = "main";
-  graphics_pipeline_stages[1].pSpecializationInfo = 0;
+  graphics_pipeline_stages.emplace_back(pipelineShaderStageCreateInfo(VK_SHADER_STAGE_VERTEX_BIT, texture_vertex_shader_module));
+  graphics_pipeline_stages.emplace_back(pipelineShaderStageCreateInfo(VK_SHADER_STAGE_FRAGMENT_BIT, texture_fragment_shader_module));
 
   VulkanPipeline graphics_pipeline;
   if (!createGraphicsPipeline(
@@ -673,4 +654,30 @@ bool createFramebuffer(VulkanDevice *device, VkRenderPass render_pass,
                                0, out_framebuffer));
 
   return true;
+}
+
+VkDescriptorSetLayoutBinding descriptorSetLayoutBinding(uint32_t binding, VkDescriptorType descriptor_type, VkShaderStageFlags shader_stage_flags) {
+  VkDescriptorSetLayoutBinding descriptor_set_layout_binding = {};
+  descriptor_set_layout_binding.binding = binding;
+  descriptor_set_layout_binding.descriptorType =
+      descriptor_type;
+  descriptor_set_layout_binding.descriptorCount = 1;
+  descriptor_set_layout_binding.stageFlags = shader_stage_flags;
+  descriptor_set_layout_binding.pImmutableSamplers = 0;
+
+  return descriptor_set_layout_binding;
+}
+
+VkPipelineShaderStageCreateInfo pipelineShaderStageCreateInfo(VkShaderStageFlagBits stage_flag, VkShaderModule shader_module) {
+  VkPipelineShaderStageCreateInfo pipeline_shader_stage_create_info = {};
+  pipeline_shader_stage_create_info.sType =
+      VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+  pipeline_shader_stage_create_info.pNext = 0;
+  pipeline_shader_stage_create_info.flags = 0;
+  pipeline_shader_stage_create_info.stage = stage_flag;
+  pipeline_shader_stage_create_info.module = shader_module;
+  pipeline_shader_stage_create_info.pName = "main";
+  pipeline_shader_stage_create_info.pSpecializationInfo = 0;
+
+  return pipeline_shader_stage_create_info;
 }
