@@ -1,12 +1,12 @@
 #include "logger.h"
 #include "platform.h"
+#include "vulkan_buffer.h"
 #include "vulkan_common.h"
 #include "vulkan_device.h"
 #include "vulkan_pipeline.h"
 #include "vulkan_resources.h"
 #include "vulkan_swapchain.h"
 #include "vulkan_texture.h"
-#include "vulkan_buffer.h"
 
 #include "glm/glm.hpp"
 #include <SDL2/SDL.h>
@@ -20,6 +20,8 @@
 #include <vulkan/vulkan.h>
 #define VMA_IMPLEMENTATION
 #include "vk_mem_alloc.h"
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb/stb_image.h"
 
 #if PLATFORM_APPLE == 1
 #define VK_ENABLE_BETA_EXTENSIONS
@@ -43,9 +45,20 @@ bool createRenderPass(VulkanDevice *device, VulkanSwapchain *swapchain,
 bool createFramebuffer(VulkanDevice *device, VkRenderPass render_pass,
                        std::vector<VkImageView> attachments, uint32_t width,
                        uint32_t height, VkFramebuffer *out_framebuffer);
-VkDescriptorSetLayoutBinding descriptorSetLayoutBinding(uint32_t binding, VkDescriptorType descriptor_type, VkShaderStageFlags shader_stage_flags);
-VkPipelineShaderStageCreateInfo pipelineShaderStageCreateInfo(VkShaderStageFlagBits stage_flag, VkShaderModule shader_module);
-void writeDescriptorSet(VulkanDevice *device, VkDescriptorSet descriptor_set, uint32_t binding, VkDescriptorType descriptor_type, VkDescriptorImageInfo *image_info, VkDescriptorBufferInfo *buffer_info);
+VkDescriptorSetLayoutBinding
+descriptorSetLayoutBinding(uint32_t binding, VkDescriptorType descriptor_type,
+                           VkShaderStageFlags shader_stage_flags);
+VkPipelineShaderStageCreateInfo
+pipelineShaderStageCreateInfo(VkShaderStageFlagBits stage_flag,
+                              VkShaderModule shader_module);
+void writeDescriptorSet(VulkanDevice *device, VkDescriptorSet descriptor_set,
+                        uint32_t binding, VkDescriptorType descriptor_type,
+                        VkDescriptorImageInfo *image_info,
+                        VkDescriptorBufferInfo *buffer_info);
+bool loadTexture(const char *path, VulkanDevice *device,
+                 VmaAllocator vma_allocator, VkQueue queue,
+                 VkCommandPool command_pool, uint32_t queue_family_index,
+                 VulkanTexture *out_texture);
 
 int main(int argc, char **argv) {
   SDL_Window *window;
@@ -119,8 +132,7 @@ int main(int argc, char **argv) {
   /* vma_allocator_create_info.pVulkanFunctions; */
   vma_allocator_create_info.instance = instance;
   vma_allocator_create_info.vulkanApiVersion = application_info.apiVersion;
-  VK_CHECK(
-      vmaCreateAllocator(&vma_allocator_create_info, &vma_allocator));
+  VK_CHECK(vmaCreateAllocator(&vma_allocator_create_info, &vma_allocator));
 
   VulkanSwapchain swapchain;
   if (!createSwapchain(&device, surface, window_width, window_height,
@@ -205,7 +217,7 @@ int main(int argc, char **argv) {
   }
 
   VkDescriptorPool descriptor_pool;
-  if(!createDescriptorPool(&device, &descriptor_pool)) {
+  if (!createDescriptorPool(&device, &descriptor_pool)) {
     FATAL("Failed to create a descriptor pool!");
     exit(1);
   }
@@ -223,7 +235,9 @@ int main(int argc, char **argv) {
     exit(1);
   }
 
-  VkDescriptorSetLayoutBinding descriptor_set_layout_binding = descriptorSetLayoutBinding(0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT);
+  VkDescriptorSetLayoutBinding descriptor_set_layout_binding =
+      descriptorSetLayoutBinding(0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                                 VK_SHADER_STAGE_FRAGMENT_BIT);
 
   VkDescriptorSetLayout descriptor_set_layout;
   if (!createDescriptorSetLayout(&device,
@@ -235,8 +249,10 @@ int main(int argc, char **argv) {
   }
 
   std::vector<VkPipelineShaderStageCreateInfo> graphics_pipeline_stages;
-  graphics_pipeline_stages.emplace_back(pipelineShaderStageCreateInfo(VK_SHADER_STAGE_VERTEX_BIT, texture_vertex_shader_module));
-  graphics_pipeline_stages.emplace_back(pipelineShaderStageCreateInfo(VK_SHADER_STAGE_FRAGMENT_BIT, texture_fragment_shader_module));
+  graphics_pipeline_stages.emplace_back(pipelineShaderStageCreateInfo(
+      VK_SHADER_STAGE_VERTEX_BIT, texture_vertex_shader_module));
+  graphics_pipeline_stages.emplace_back(pipelineShaderStageCreateInfo(
+      VK_SHADER_STAGE_FRAGMENT_BIT, texture_fragment_shader_module));
 
   VulkanPipeline graphics_pipeline;
   if (!createGraphicsPipeline(
@@ -252,14 +268,20 @@ int main(int argc, char **argv) {
                         0);
 
   VkDescriptorSet texture_descriptor_set;
-  if(!allocateDescriptorSet(&device, descriptor_pool, descriptor_set_layout, &texture_descriptor_set)) {
+  if (!allocateDescriptorSet(&device, descriptor_pool, descriptor_set_layout,
+                             &texture_descriptor_set)) {
     FATAL("Failed to create a descriptor set!");
     exit(1);
   }
 
   VulkanTexture texture;
-  if(!createTexture(&device, vma_allocator, VK_FORMAT_R8G8B8A8_SRGB, window_width, window_height, &texture)) {
-    FATAL("Failed to create a texture!");
+  if (!loadTexture(
+          "assets/textures/brickwall.jpg", &device, vma_allocator,
+          queues[VULKAN_DEVICE_QUEUE_TYPE_GRAPHICS],
+          command_pools[VULKAN_DEVICE_QUEUE_TYPE_GRAPHICS],
+          device.queue_family_indices[VULKAN_DEVICE_QUEUE_TYPE_GRAPHICS],
+          &texture)) {
+    FATAL("Failed to load a texture!");
     exit(1);
   }
 
@@ -267,7 +289,9 @@ int main(int argc, char **argv) {
   descriptor_image_info.sampler = texture.sampler;
   descriptor_image_info.imageView = texture.view;
   descriptor_image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-  writeDescriptorSet(&device, texture_descriptor_set, 0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, &descriptor_image_info, 0);
+  writeDescriptorSet(&device, texture_descriptor_set, 0,
+                     VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                     &descriptor_image_info, 0);
 
   bool running = true;
   while (running) {
@@ -341,10 +365,13 @@ int main(int argc, char **argv) {
 
     vkCmdSetScissor(graphics_command_buffer, 0, 1, &scissor);
 
-    // vkCmdBindPipeline(graphics_command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphics_pipeline.handle);
-    // vkCmdBindDescriptorSets(graphics_command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphics_pipeline.layout, 0, 1, &texture_descriptor_set, 0, 0);
+    vkCmdBindPipeline(graphics_command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                      graphics_pipeline.handle);
+    vkCmdBindDescriptorSets(
+        graphics_command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+        graphics_pipeline.layout, 0, 1, &texture_descriptor_set, 0, 0);
 
-    // vkCmdDraw(graphics_command_buffer, 4, 1, 0, 0);
+    vkCmdDraw(graphics_command_buffer, 4, 1, 0, 0);
 
     vkCmdEndRenderPass(graphics_command_buffer);
 
@@ -435,6 +462,7 @@ int main(int argc, char **argv) {
   }
   vkDestroyRenderPass(device.logical_device, render_pass, 0);
   destroySwapchain(&swapchain, &device);
+  vmaDestroyAllocator(vma_allocator);
   destroyDevice(&device);
   vkDestroySurfaceKHR(instance, surface, 0);
 #ifndef NDEBUG
@@ -694,11 +722,12 @@ bool createFramebuffer(VulkanDevice *device, VkRenderPass render_pass,
   return true;
 }
 
-VkDescriptorSetLayoutBinding descriptorSetLayoutBinding(uint32_t binding, VkDescriptorType descriptor_type, VkShaderStageFlags shader_stage_flags) {
+VkDescriptorSetLayoutBinding
+descriptorSetLayoutBinding(uint32_t binding, VkDescriptorType descriptor_type,
+                           VkShaderStageFlags shader_stage_flags) {
   VkDescriptorSetLayoutBinding descriptor_set_layout_binding = {};
   descriptor_set_layout_binding.binding = binding;
-  descriptor_set_layout_binding.descriptorType =
-      descriptor_type;
+  descriptor_set_layout_binding.descriptorType = descriptor_type;
   descriptor_set_layout_binding.descriptorCount = 1;
   descriptor_set_layout_binding.stageFlags = shader_stage_flags;
   descriptor_set_layout_binding.pImmutableSamplers = 0;
@@ -706,7 +735,9 @@ VkDescriptorSetLayoutBinding descriptorSetLayoutBinding(uint32_t binding, VkDesc
   return descriptor_set_layout_binding;
 }
 
-VkPipelineShaderStageCreateInfo pipelineShaderStageCreateInfo(VkShaderStageFlagBits stage_flag, VkShaderModule shader_module) {
+VkPipelineShaderStageCreateInfo
+pipelineShaderStageCreateInfo(VkShaderStageFlagBits stage_flag,
+                              VkShaderModule shader_module) {
   VkPipelineShaderStageCreateInfo pipeline_shader_stage_create_info = {};
   pipeline_shader_stage_create_info.sType =
       VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
@@ -720,7 +751,10 @@ VkPipelineShaderStageCreateInfo pipelineShaderStageCreateInfo(VkShaderStageFlagB
   return pipeline_shader_stage_create_info;
 }
 
-void writeDescriptorSet(VulkanDevice *device, VkDescriptorSet descriptor_set, uint32_t binding, VkDescriptorType descriptor_type, VkDescriptorImageInfo *image_info, VkDescriptorBufferInfo *buffer_info) {
+void writeDescriptorSet(VulkanDevice *device, VkDescriptorSet descriptor_set,
+                        uint32_t binding, VkDescriptorType descriptor_type,
+                        VkDescriptorImageInfo *image_info,
+                        VkDescriptorBufferInfo *buffer_info) {
   VkWriteDescriptorSet write_descriptor_set = {};
   write_descriptor_set.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
   write_descriptor_set.pNext = 0;
@@ -733,6 +767,30 @@ void writeDescriptorSet(VulkanDevice *device, VkDescriptorSet descriptor_set, ui
   write_descriptor_set.pBufferInfo = buffer_info;
   write_descriptor_set.pTexelBufferView = 0;
 
-  vkUpdateDescriptorSets(device->logical_device, 1,
-                         &write_descriptor_set, 0, 0);
+  vkUpdateDescriptorSets(device->logical_device, 1, &write_descriptor_set, 0,
+                         0);
+}
+
+bool loadTexture(const char *path, VulkanDevice *device,
+                 VmaAllocator vma_allocator, VkQueue queue,
+                 VkCommandPool command_pool, uint32_t queue_family_index,
+                 VulkanTexture *out_texture) {
+  int texture_width, texture_height, texture_num_channels;
+  stbi_set_flip_vertically_on_load(true);
+  unsigned char *data = stbi_load(path, &texture_width, &texture_height,
+                                  &texture_num_channels, STBI_rgb_alpha);
+  if (!data) {
+    FATAL("Failed to load image at path %s!", path);
+    return false;
+  }
+
+  createTexture(device, vma_allocator, VK_FORMAT_R8G8B8A8_SRGB, texture_width,
+                texture_height, out_texture);
+  writeTextureData(out_texture, device, data, vma_allocator, queue,
+                   command_pool, queue_family_index);
+
+  stbi_set_flip_vertically_on_load(false);
+  stbi_image_free(data);
+
+  return true;
 }

@@ -33,6 +33,7 @@ include_directories(
   ${Vulkan_INCLUDE_DIRS}
   ${SDL2_INCLUDE_DIRS}
   ${ASSIMP_INCLUDE_DIR}
+  vendor/
   vendor/glm
   vendor/VulkanMemoryAllocator/include
 )

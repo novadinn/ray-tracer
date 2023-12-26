@@ -96,18 +96,13 @@ bool createGraphicsPipeline(
   dynamic_state_create_info.dynamicStateCount = dynamic_states.size();
   dynamic_state_create_info.pDynamicStates = &dynamic_states[0];
 
-  VkVertexInputBindingDescription binding_description = {};
-  binding_description.binding = 0;
-  binding_description.stride = 0;
-  binding_description.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
-
   VkPipelineVertexInputStateCreateInfo vertex_input_info = {};
   vertex_input_info.sType =
       VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
   vertex_input_info.pNext = 0;
   vertex_input_info.flags = 0;
-  vertex_input_info.vertexBindingDescriptionCount = 1;
-  vertex_input_info.pVertexBindingDescriptions = &binding_description;
+  vertex_input_info.vertexBindingDescriptionCount = 0;
+  vertex_input_info.pVertexBindingDescriptions = 0;
   vertex_input_info.vertexAttributeDescriptionCount = 0;
   vertex_input_info.pVertexAttributeDescriptions = 0;
 
