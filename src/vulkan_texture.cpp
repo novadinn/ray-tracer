@@ -2,8 +2,7 @@
 
 #include "logger.h"
 #include "vulkan_common.h"
-
-#include "vulkan_buffer.h"
+#include "vulkan_resources.h"
 
 bool createTexture(VulkanDevice *device, VmaAllocator vma_allocator,
                    VkFormat format, uint32_t width, uint32_t height,
@@ -96,4 +95,129 @@ void destroyTexture(VulkanTexture *texture, VulkanDevice *device,
   vkDestroySampler(device->logical_device, texture->sampler, 0);
   vkDestroyImageView(device->logical_device, texture->view, 0);
   vmaDestroyImage(vma_allocator, texture->handle, texture->memory);
+}
+
+bool writeTextureData(VulkanTexture *texture, VulkanDevice *device, void *pixels, VmaAllocator vma_allocator, VkQueue queue, VkCommandPool command_pool, uint32_t queue_family_index) {
+  /* TODO: instead of 4, determine the size of the texture via texture->format */
+  uint32_t size = texture->width * texture->height * 4;
+
+  VulkanBuffer staging_buffer;
+  if(!createBuffer(vma_allocator, size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, 
+                    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                     VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                 VMA_MEMORY_USAGE_CPU_ONLY, &staging_buffer)) {
+    ERROR("Failed to create a staging buffer!");
+    return false;
+  }
+
+  if(!loadBufferData(&staging_buffer, vma_allocator, pixels)) {
+    ERROR("Failed to load buffer data!");
+    return false;
+  }
+
+  VkCommandBuffer temp_command_buffer;
+  if(!allocateAndBeginSingleUseCommandBuffer(device, command_pool, &temp_command_buffer)) {
+    ERROR("Failed to allocate a temp command buffer!");
+    return false;
+  }
+
+  if(!transitionTextureLayout(texture, temp_command_buffer, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, queue_family_index)) {
+    ERROR("Failed to transition image layout!");
+    return false;
+  }
+  if(!copyFromBufferToTexture(texture, &staging_buffer, temp_command_buffer)) {
+    ERROR("Failed to copy buffer data to texture!");
+    return false;
+  }
+  if(!transitionTextureLayout(texture, temp_command_buffer, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, queue_family_index)) {
+    ERROR("Failed to transition image layout!");
+    return false;
+  }
+
+  endAndFreeSingleUseCommandBuffer(temp_command_buffer, device, command_pool, queue);
+  destroyBuffer(&staging_buffer, vma_allocator);
+
+  return true;
+}
+
+bool transitionTextureLayout(VulkanTexture *texture, VkCommandBuffer command_buffer, VkImageLayout old_layout, VkImageLayout new_layout, uint32_t queue_family_index) {
+  VkImageMemoryBarrier barrier = {VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+  barrier.oldLayout = old_layout;
+  barrier.newLayout = new_layout;
+  barrier.srcQueueFamilyIndex = queue_family_index;
+  barrier.dstQueueFamilyIndex = queue_family_index;
+  barrier.image = texture->handle;
+  barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+  barrier.subresourceRange.baseMipLevel = 0;
+  barrier.subresourceRange.levelCount = 1;
+  barrier.subresourceRange.baseArrayLayer = 0;
+  barrier.subresourceRange.layerCount = 1;
+
+  VkPipelineStageFlags source_stage;
+  VkPipelineStageFlags dest_stage;
+
+  if (old_layout == VK_IMAGE_LAYOUT_UNDEFINED &&
+      new_layout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL) {
+    barrier.srcAccessMask = 0;
+    barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+
+    source_stage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+
+    dest_stage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+  } else if (old_layout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL &&
+             new_layout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
+    barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
+    source_stage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+
+    dest_stage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+  } else if (old_layout == VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL &&
+             new_layout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
+    barrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+    barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
+    source_stage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+
+    dest_stage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+  } else if (old_layout == VK_IMAGE_LAYOUT_UNDEFINED &&
+             new_layout == VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL) {
+    barrier.srcAccessMask = 0;
+    barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+
+    source_stage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+
+    dest_stage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+  } else {
+    ERROR("Unsupported layout transition!");
+    return false;
+  }
+
+  vkCmdPipelineBarrier(command_buffer, source_stage, dest_stage, 0,
+                       0, 0, 0, 0, 1, &barrier);
+
+  return true;
+}
+
+bool copyFromBufferToTexture(VulkanTexture *texture, VulkanBuffer *buffer, VkCommandBuffer command_buffer) {
+  /* TODO: instead of 4, determine the size of the texture via texture->format */
+  uint32_t size = texture->width * texture->height * 4;
+
+  VkBufferImageCopy buffer_image_copy = {};
+  buffer_image_copy.bufferOffset = 0;
+  buffer_image_copy.bufferRowLength = 0;
+  buffer_image_copy.bufferImageHeight = 0;
+  buffer_image_copy.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+  buffer_image_copy.imageSubresource.mipLevel = 0;
+  buffer_image_copy.imageSubresource.baseArrayLayer = 0;
+  buffer_image_copy.imageSubresource.layerCount = 1;
+  buffer_image_copy.imageExtent.width = texture->width;
+  buffer_image_copy.imageExtent.height = texture->height;
+  buffer_image_copy.imageExtent.depth = 1;
+
+  vkCmdCopyBufferToImage(command_buffer, buffer->handle,
+                        texture->handle, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                        1, &buffer_image_copy);
+
+  return true;
 }

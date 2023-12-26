@@ -341,6 +341,11 @@ int main(int argc, char **argv) {
 
     vkCmdSetScissor(graphics_command_buffer, 0, 1, &scissor);
 
+    // vkCmdBindPipeline(graphics_command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphics_pipeline.handle);
+    // vkCmdBindDescriptorSets(graphics_command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphics_pipeline.layout, 0, 1, &texture_descriptor_set, 0, 0);
+
+    // vkCmdDraw(graphics_command_buffer, 4, 1, 0, 0);
+
     vkCmdEndRenderPass(graphics_command_buffer);
 
     VK_CHECK(vkEndCommandBuffer(graphics_command_buffer));
