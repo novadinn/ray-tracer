@@ -2,8 +2,9 @@
 #include "platform.h"
 #include "vulkan_common.h"
 #include "vulkan_device.h"
-#include "vulkan_swapchain.h"
+#include "vulkan_pipeline.h"
 #include "vulkan_resources.h"
+#include "vulkan_swapchain.h"
 
 #include "glm/glm.hpp"
 #include <SDL2/SDL.h>
@@ -182,6 +183,68 @@ int main(int argc, char **argv) {
     images_in_flight[i] = 0;
   }
 
+  VkShaderModule texture_vertex_shader_module;
+  if (!createShaderModule(&device, "assets/shaders/texture.vert.spv",
+                          &texture_vertex_shader_module)) {
+    FATAL("Failed to load a shader!");
+    exit(1);
+  }
+  VkShaderModule texture_fragment_shader_module;
+  if (!createShaderModule(&device, "assets/shaders/texture.frag.spv",
+                          &texture_fragment_shader_module)) {
+    FATAL("Failed to load a shader!");
+    exit(1);
+  }
+
+  VkDescriptorSetLayoutBinding descriptor_set_layout_binding = {};
+  descriptor_set_layout_binding.binding = 0;
+  descriptor_set_layout_binding.descriptorType =
+      VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+  descriptor_set_layout_binding.descriptorCount = 1;
+  descriptor_set_layout_binding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+  descriptor_set_layout_binding.pImmutableSamplers = 0;
+
+  VkDescriptorSetLayout descriptor_set_layout;
+  if (!createDescriptorSetLayout(&device,
+                                 std::vector<VkDescriptorSetLayoutBinding>{
+                                     descriptor_set_layout_binding},
+                                 &descriptor_set_layout)) {
+    FATAL("Failed to create a descriptor set layout!");
+    return false;
+  }
+
+  std::vector<VkPipelineShaderStageCreateInfo> graphics_pipeline_stages;
+  graphics_pipeline_stages.resize(2);
+  graphics_pipeline_stages[0].sType =
+      VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+  graphics_pipeline_stages[0].pNext = 0;
+  graphics_pipeline_stages[0].flags = 0;
+  graphics_pipeline_stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
+  graphics_pipeline_stages[0].module = texture_vertex_shader_module;
+  graphics_pipeline_stages[0].pName = "main";
+  graphics_pipeline_stages[0].pSpecializationInfo = 0;
+  graphics_pipeline_stages[1].sType =
+      VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+  graphics_pipeline_stages[1].pNext = 0;
+  graphics_pipeline_stages[1].flags = 0;
+  graphics_pipeline_stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+  graphics_pipeline_stages[1].module = texture_fragment_shader_module;
+  graphics_pipeline_stages[1].pName = "main";
+  graphics_pipeline_stages[1].pSpecializationInfo = 0;
+
+  VulkanPipeline graphics_pipeline;
+  if (!createGraphicsPipeline(
+          &device, render_pass,
+          std::vector<VkDescriptorSetLayout>{descriptor_set_layout},
+          graphics_pipeline_stages, &graphics_pipeline)) {
+    FATAL("Failed to create a graphics pipeline!");
+    exit(1);
+  }
+
+  vkDestroyShaderModule(device.logical_device, texture_vertex_shader_module, 0);
+  vkDestroyShaderModule(device.logical_device, texture_fragment_shader_module,
+                        0);
+
   bool running = true;
   while (running) {
     SDL_Event event;
@@ -316,6 +379,10 @@ int main(int argc, char **argv) {
   }
 
   vkDeviceWaitIdle(device.logical_device);
+
+  destroyPipeline(&graphics_pipeline, &device);
+
+  vkDestroyDescriptorSetLayout(device.logical_device, descriptor_set_layout, 0);
 
   for (auto it = command_buffers.begin(); it != command_buffers.end(); it++) {
     std::vector<VkCommandBuffer> &command_buffers = it->second;

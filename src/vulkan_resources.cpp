@@ -1,7 +1,9 @@
 #include "vulkan_resources.h"
 
-#include "vulkan_common.h"
 #include "logger.h"
+#include "vulkan_common.h"
+
+#include <stdio.h>
 
 bool createCommandPool(VulkanDevice *device, uint32_t queue_family_index,
                        VkCommandPool *out_command_pool) {
@@ -35,7 +37,8 @@ bool allocateCommandBuffer(VulkanDevice *device, VkCommandPool command_pool,
   return true;
 }
 
-void beginCommandBuffer(VkCommandBuffer command_buffer, VkCommandBufferUsageFlags usage_flags) {
+void beginCommandBuffer(VkCommandBuffer command_buffer,
+                        VkCommandBufferUsageFlags usage_flags) {
   VkCommandBufferBeginInfo begin_info = {};
   begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
   begin_info.pNext = 0;
@@ -45,18 +48,23 @@ void beginCommandBuffer(VkCommandBuffer command_buffer, VkCommandBufferUsageFlag
   VK_CHECK(vkBeginCommandBuffer(command_buffer, &begin_info));
 }
 
-bool allocateAndBeginSingleUseCommandBuffer(VulkanDevice *device, VkCommandPool command_pool,
-                                            VkCommandBuffer *out_command_buffer) {
-  if(!allocateCommandBuffer(device, command_pool, out_command_buffer)) {
+bool allocateAndBeginSingleUseCommandBuffer(
+    VulkanDevice *device, VkCommandPool command_pool,
+    VkCommandBuffer *out_command_buffer) {
+  if (!allocateCommandBuffer(device, command_pool, out_command_buffer)) {
     ERROR("Failed to allocate a command buffer!");
     return false;
   }
-  beginCommandBuffer(*out_command_buffer, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
+  beginCommandBuffer(*out_command_buffer,
+                     VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
 
   return true;
 }
 
-void endAndFreeSingleUseCommandBuffer(VkCommandBuffer command_buffer, VulkanDevice *device, VkCommandPool command_pool, VkQueue queue) {
+void endAndFreeSingleUseCommandBuffer(VkCommandBuffer command_buffer,
+                                      VulkanDevice *device,
+                                      VkCommandPool command_pool,
+                                      VkQueue queue) {
   VK_CHECK(vkEndCommandBuffer(command_buffer));
 
   VkSubmitInfo submit_info;
@@ -97,6 +105,57 @@ bool createFence(VulkanDevice *device, VkFence *out_fence) {
 
   VK_CHECK(
       vkCreateFence(device->logical_device, &fence_create_info, 0, out_fence));
+
+  return true;
+}
+
+bool createShaderModule(VulkanDevice *device, const char *path,
+                        VkShaderModule *out_shader_module) {
+  FILE *file = fopen(path, "rb");
+  if (!file) {
+    ERROR("Failed to open file %s", path);
+    return false;
+  }
+
+  fseek(file, 0, SEEK_END);
+  int64_t file_size = ftell(file);
+  fseek(file, 0, SEEK_SET);
+
+  std::vector<uint32_t> file_data;
+  file_data.resize(file_size);
+  fread(&file_data[0], file_size, 1, file);
+  fclose(file);
+
+  VkShaderModuleCreateInfo create_info = {};
+  create_info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+  create_info.pNext = 0;
+  create_info.flags = 0;
+  create_info.codeSize = file_size;
+  create_info.pCode = &file_data[0];
+
+  VK_CHECK(vkCreateShaderModule(device->logical_device, &create_info, 0,
+                                out_shader_module));
+
+  return true;
+}
+
+bool createDescriptorSetLayout(
+    VulkanDevice *device,
+    std::vector<VkDescriptorSetLayoutBinding> descriptor_set_layout_bindings,
+    VkDescriptorSetLayout *out_descriptor_set_layout) {
+  VkDescriptorSetLayoutCreateInfo descriptor_set_layout_create_info = {};
+  descriptor_set_layout_create_info.sType =
+      VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+  descriptor_set_layout_create_info.pNext = 0;
+  descriptor_set_layout_create_info.flags = 0;
+  descriptor_set_layout_create_info.bindingCount =
+      descriptor_set_layout_bindings.size();
+  descriptor_set_layout_create_info.pBindings =
+      descriptor_set_layout_bindings.data();
+
+  VK_CHECK(vkCreateDescriptorSetLayout(device->logical_device,
+                                       &descriptor_set_layout_create_info, 0,
+                                       out_descriptor_set_layout));
 
   return true;
 }
