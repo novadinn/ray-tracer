@@ -45,6 +45,8 @@ bool createRenderPass(VulkanDevice *device, VulkanSwapchain *swapchain,
 bool createFramebuffer(VulkanDevice *device, VkRenderPass render_pass,
                        std::vector<VkImageView> attachments, uint32_t width,
                        uint32_t height, VkFramebuffer *out_framebuffer);
+bool createVmaAllocator(VulkanDevice *device, VkInstance instance,
+                        uint32_t api_version, VmaAllocator *out_vma_allocator);
 VkDescriptorSetLayoutBinding
 descriptorSetLayoutBinding(uint32_t binding, VkDescriptorType descriptor_type,
                            VkShaderStageFlags shader_stage_flags);
@@ -119,21 +121,6 @@ int main(int argc, char **argv) {
     exit(1);
   }
 
-  VmaAllocator vma_allocator;
-
-  VmaAllocatorCreateInfo vma_allocator_create_info = {};
-  vma_allocator_create_info.flags = 0;
-  vma_allocator_create_info.physicalDevice = device.physical_device;
-  vma_allocator_create_info.device = device.logical_device;
-  /* vma_allocator_create_info.preferredLargeHeapBlockSize; */
-  vma_allocator_create_info.pAllocationCallbacks = 0;
-  /* vma_allocator_create_info.pDeviceMemoryCallbacks; */
-  /* vma_allocator_create_info.pHeapSizeLimit; */
-  /* vma_allocator_create_info.pVulkanFunctions; */
-  vma_allocator_create_info.instance = instance;
-  vma_allocator_create_info.vulkanApiVersion = application_info.apiVersion;
-  VK_CHECK(vmaCreateAllocator(&vma_allocator_create_info, &vma_allocator));
-
   VulkanSwapchain swapchain;
   if (!createSwapchain(&device, surface, window_width, window_height,
                        &swapchain)) {
@@ -158,33 +145,59 @@ int main(int argc, char **argv) {
     }
   }
 
-  std::unordered_map<VulkanDeviceQueueType, VkQueue> queues;
-  std::unordered_map<VulkanDeviceQueueType, VkCommandPool> command_pools;
-  std::unordered_map<VulkanDeviceQueueType, std::vector<VkCommandBuffer>>
-      command_buffers;
-  /* TODO: we dont need multiple command pools and command buffers, if family
-   * indices are not unique */
-  for (auto it = device.queue_family_indices.begin();
-       it != device.queue_family_indices.end(); it++) {
-    VkQueue queue;
-    vkGetDeviceQueue(device.logical_device, it->second, 0, &queue);
-    queues.emplace(it->first, queue);
+  VmaAllocator vma_allocator;
+  if (!createVmaAllocator(&device, instance, application_info.apiVersion,
+                          &vma_allocator)) {
+    FATAL("Failed to create a vma allocator!");
+    exit(1);
+  }
 
-    VkCommandPool command_pool;
-    if (!createCommandPool(&device, it->second, &command_pool)) {
-      FATAL("Failed to create a command pool!");
+  const uint32_t graphics_family_index =
+      device.queue_family_indices[VULKAN_DEVICE_QUEUE_TYPE_GRAPHICS];
+  const uint32_t compute_family_index =
+      device.queue_family_indices[VULKAN_DEVICE_QUEUE_TYPE_COMPUTE];
+  const uint32_t present_family_index =
+      device.queue_family_indices[VULKAN_DEVICE_QUEUE_TYPE_PRESENT];
+
+  VkQueue graphics_queue;
+  vkGetDeviceQueue(device.logical_device, graphics_family_index, 0,
+                   &graphics_queue);
+  VkQueue compute_queue;
+  vkGetDeviceQueue(device.logical_device, compute_family_index, 0,
+                   &compute_queue);
+  VkQueue present_queue;
+  vkGetDeviceQueue(device.logical_device, present_family_index, 0,
+                   &present_queue);
+
+  VkCommandPool graphics_command_pool;
+  if (!createCommandPool(&device, graphics_family_index,
+                         &graphics_command_pool)) {
+    FATAL("Failed to create a command pool!");
+    exit(1);
+  }
+  VkCommandPool compute_command_pool;
+  if (!createCommandPool(&device, compute_family_index,
+                         &compute_command_pool)) {
+    FATAL("Failed to create a command pool!");
+    exit(1);
+  }
+
+  std::vector<VkCommandBuffer> graphics_command_buffers;
+  graphics_command_buffers.resize(swapchain.images.size());
+  for (uint32_t i = 0; i < graphics_command_buffers.size(); ++i) {
+    if (!allocateCommandBuffer(&device, graphics_command_pool,
+                               &graphics_command_buffers[i])) {
+      FATAL("Failed to allocate a command buffer!");
       exit(1);
     }
-    command_pools.emplace(it->first, command_pool);
-
-    command_buffers.emplace(it->first, std::vector<VkCommandBuffer>{});
-    command_buffers[it->first].resize(swapchain.images.size());
-    for (uint32_t i = 0; i < command_buffers[it->first].size(); ++i) {
-      if (!allocateCommandBuffer(&device, command_pool,
-                                 &command_buffers[it->first][i])) {
-        FATAL("Failed to allocate a command buffer!");
-        exit(1);
-      }
+  }
+  std::vector<VkCommandBuffer> compute_command_buffers;
+  compute_command_buffers.resize(swapchain.images.size());
+  for (uint32_t i = 0; i < compute_command_buffers.size(); ++i) {
+    if (!allocateCommandBuffer(&device, compute_command_pool,
+                               &compute_command_buffers[i])) {
+      FATAL("Failed to allocate a command buffer!");
+      exit(1);
     }
   }
 
@@ -317,33 +330,19 @@ int main(int argc, char **argv) {
     exit(1);
   }
   VkCommandBuffer temp_command_buffer;
-  if (!allocateAndBeginSingleUseCommandBuffer(
-          &device, command_pools[VULKAN_DEVICE_QUEUE_TYPE_GRAPHICS],
-          &temp_command_buffer)) {
+  if (!allocateAndBeginSingleUseCommandBuffer(&device, graphics_command_pool,
+                                              &temp_command_buffer)) {
     ERROR("Failed to allocate a temp command buffer!");
     exit(1);
   }
   if (!transitionTextureLayout(
           &texture, temp_command_buffer, VK_IMAGE_LAYOUT_UNDEFINED,
-          VK_IMAGE_LAYOUT_GENERAL,
-          device.queue_family_indices[VULKAN_DEVICE_QUEUE_TYPE_GRAPHICS])) {
+          VK_IMAGE_LAYOUT_GENERAL, graphics_family_index)) {
     ERROR("Failed to transition image layout!");
     exit(1);
   }
-  endAndFreeSingleUseCommandBuffer(
-      temp_command_buffer, &device,
-      command_pools[VULKAN_DEVICE_QUEUE_TYPE_GRAPHICS],
-      queues[VULKAN_DEVICE_QUEUE_TYPE_GRAPHICS]);
-
-  // if (!loadTexture(
-  //         "assets/textures/brickwall.jpg", &device, vma_allocator,
-  //         queues[VULKAN_DEVICE_QUEUE_TYPE_GRAPHICS],
-  //         command_pools[VULKAN_DEVICE_QUEUE_TYPE_GRAPHICS],
-  //         device.queue_family_indices[VULKAN_DEVICE_QUEUE_TYPE_GRAPHICS],
-  //         &texture)) {
-  //   FATAL("Failed to load a texture!");
-  //   exit(1);
-  // }
+  endAndFreeSingleUseCommandBuffer(temp_command_buffer, &device,
+                                   graphics_command_pool, graphics_queue);
 
   VkDescriptorImageInfo descriptor_image_info = {};
   descriptor_image_info.sampler = texture.sampler;
@@ -392,7 +391,7 @@ int main(int argc, char **argv) {
     vkDeviceWaitIdle(device.logical_device);
 
     VkCommandBuffer compute_command_buffer =
-        command_buffers[VULKAN_DEVICE_QUEUE_TYPE_COMPUTE][image_index];
+        compute_command_buffers[image_index];
     beginCommandBuffer(compute_command_buffer, 0);
 
     vkCmdBindPipeline(compute_command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE,
@@ -413,7 +412,7 @@ int main(int argc, char **argv) {
                           &image_index);
 
     VkCommandBuffer graphics_command_buffer =
-        command_buffers[VULKAN_DEVICE_QUEUE_TYPE_GRAPHICS][image_index];
+        graphics_command_buffers[image_index];
     beginCommandBuffer(graphics_command_buffer, 0);
 
     VkImageMemoryBarrier image_memory_barrier = {};
@@ -478,13 +477,14 @@ int main(int argc, char **argv) {
 
     vkCmdSetScissor(graphics_command_buffer, 0, 1, &scissor);
 
-    vkCmdBindPipeline(graphics_command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                      graphics_pipeline.handle);
-    vkCmdBindDescriptorSets(
-        graphics_command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-        graphics_pipeline.layout, 0, 1, &texture_descriptor_set, 0, 0);
+    // vkCmdBindPipeline(graphics_command_buffer,
+    // VK_PIPELINE_BIND_POINT_GRAPHICS,
+    //                   graphics_pipeline.handle);
+    // vkCmdBindDescriptorSets(
+    //     graphics_command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+    //     graphics_pipeline.layout, 0, 1, &texture_descriptor_set, 0, 0);
 
-    vkCmdDraw(graphics_command_buffer, 4, 1, 0, 0);
+    // vkCmdDraw(graphics_command_buffer, 4, 1, 0, 0);
 
     vkCmdEndRenderPass(graphics_command_buffer);
 
@@ -502,8 +502,8 @@ int main(int argc, char **argv) {
     VK_CHECK(vkResetFences(device.logical_device, 1,
                            &in_flight_fences[current_frame]));
 
-    VkPipelineStageFlags flags[1] = {
-        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
+    VkPipelineStageFlags wait_dst_stage_mask =
+        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
 
     VkSubmitInfo submit_info = {};
     submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
@@ -515,9 +515,7 @@ int main(int argc, char **argv) {
     submit_info.pCommandBuffers = &graphics_command_buffer;
     submit_info.signalSemaphoreCount = 1;
     submit_info.pSignalSemaphores = &queue_complete_semaphores[current_frame];
-    submit_info.pWaitDstStageMask = flags;
-
-    VkQueue graphics_queue = queues[VULKAN_DEVICE_QUEUE_TYPE_GRAPHICS];
+    submit_info.pWaitDstStageMask = &wait_dst_stage_mask;
 
     VkResult result = vkQueueSubmit(graphics_queue, 1, &submit_info,
                                     in_flight_fences[current_frame]);
@@ -534,8 +532,6 @@ int main(int argc, char **argv) {
     present_info.pSwapchains = &swapchain.handle;
     present_info.pImageIndices = &image_index;
     present_info.pResults = 0;
-
-    VkQueue present_queue = queues[VULKAN_DEVICE_QUEUE_TYPE_PRESENT];
 
     result = vkQueuePresentKHR(present_queue, &present_info);
     if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) {
@@ -562,14 +558,15 @@ int main(int argc, char **argv) {
 
   vkDestroyDescriptorSetLayout(device.logical_device, descriptor_set_layout, 0);
 
-  for (auto it = command_buffers.begin(); it != command_buffers.end(); it++) {
-    std::vector<VkCommandBuffer> &command_buffers = it->second;
-    vkFreeCommandBuffers(device.logical_device, command_pools[it->first],
-                         command_buffers.size(), command_buffers.data());
-  }
-  for (auto it = command_pools.begin(); it != command_pools.end(); it++) {
-    vkDestroyCommandPool(device.logical_device, it->second, 0);
-  }
+  vkFreeCommandBuffers(device.logical_device, graphics_command_pool,
+                       graphics_command_buffers.size(),
+                       graphics_command_buffers.data());
+  vkFreeCommandBuffers(device.logical_device, compute_command_pool,
+                       compute_command_buffers.size(),
+                       compute_command_buffers.data());
+  vkDestroyCommandPool(device.logical_device, graphics_command_pool, 0);
+  vkDestroyCommandPool(device.logical_device, compute_command_pool, 0);
+
   for (uint32_t i = 0; i < swapchain.max_frames_in_flight; ++i) {
     vkDestroySemaphore(device.logical_device, image_available_semaphores[i], 0);
     vkDestroySemaphore(device.logical_device, queue_complete_semaphores[i], 0);
@@ -836,6 +833,24 @@ bool createFramebuffer(VulkanDevice *device, VkRenderPass render_pass,
 
   VK_CHECK(vkCreateFramebuffer(device->logical_device, &framebuffer_create_info,
                                0, out_framebuffer));
+
+  return true;
+}
+
+bool createVmaAllocator(VulkanDevice *device, VkInstance instance,
+                        uint32_t api_version, VmaAllocator *out_vma_allocator) {
+  VmaAllocatorCreateInfo vma_allocator_create_info = {};
+  vma_allocator_create_info.flags = 0;
+  vma_allocator_create_info.physicalDevice = device->physical_device;
+  vma_allocator_create_info.device = device->logical_device;
+  /* vma_allocator_create_info.preferredLargeHeapBlockSize; */
+  vma_allocator_create_info.pAllocationCallbacks = 0;
+  /* vma_allocator_create_info.pDeviceMemoryCallbacks; */
+  /* vma_allocator_create_info.pHeapSizeLimit; */
+  /* vma_allocator_create_info.pVulkanFunctions; */
+  vma_allocator_create_info.instance = instance;
+  vma_allocator_create_info.vulkanApiVersion = api_version;
+  VK_CHECK(vmaCreateAllocator(&vma_allocator_create_info, out_vma_allocator));
 
   return true;
 }
