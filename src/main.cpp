@@ -268,14 +268,15 @@ int main(int argc, char **argv) {
                         0);
 
   VkShaderModule compute_shader_module;
-  if(!createShaderModule(&device, "assets/shaders/ray_tracing.comp.spv", &compute_shader_module)) {
+  if (!createShaderModule(&device, "assets/shaders/ray_tracing.comp.spv",
+                          &compute_shader_module)) {
     FATAL("Failed to create a compute shader module!");
     exit(1);
   }
 
   VkDescriptorSetLayoutBinding compute_descriptor_set_layout_binding =
-    descriptorSetLayoutBinding(0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-                                VK_SHADER_STAGE_COMPUTE_BIT);
+      descriptorSetLayoutBinding(0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+                                 VK_SHADER_STAGE_COMPUTE_BIT);
 
   VkDescriptorSetLayout compute_descriptor_set_layout;
   if (!createDescriptorSetLayout(&device,
@@ -286,11 +287,15 @@ int main(int argc, char **argv) {
     exit(1);
   }
 
-  VkPipelineShaderStageCreateInfo compute_stage_create_info = 
-      pipelineShaderStageCreateInfo(VK_SHADER_STAGE_COMPUTE_BIT, compute_shader_module);
+  VkPipelineShaderStageCreateInfo compute_stage_create_info =
+      pipelineShaderStageCreateInfo(VK_SHADER_STAGE_COMPUTE_BIT,
+                                    compute_shader_module);
 
   VulkanPipeline compute_pipeline;
-  if(!createComputePipeline(&device, std::vector<VkDescriptorSetLayout>{compute_descriptor_set_layout}, compute_stage_create_info, &compute_pipeline)) {
+  if (!createComputePipeline(
+          &device,
+          std::vector<VkDescriptorSetLayout>{compute_descriptor_set_layout},
+          compute_stage_create_info, &compute_pipeline)) {
     FATAL("Failed to create a compute pipeline!");
     exit(1);
   }
@@ -349,7 +354,8 @@ int main(int argc, char **argv) {
                      &descriptor_image_info, 0);
 
   VkDescriptorSet compute_texture_descriptor_set;
-  if (!allocateDescriptorSet(&device, descriptor_pool, compute_descriptor_set_layout,
+  if (!allocateDescriptorSet(&device, descriptor_pool,
+                             compute_descriptor_set_layout,
                              &compute_texture_descriptor_set)) {
     FATAL("Failed to create a descriptor set!");
     exit(1);
@@ -385,14 +391,17 @@ int main(int argc, char **argv) {
 
     vkDeviceWaitIdle(device.logical_device);
 
-    VkCommandBuffer compute_command_buffer = command_buffers[VULKAN_DEVICE_QUEUE_TYPE_COMPUTE][image_index];
+    VkCommandBuffer compute_command_buffer =
+        command_buffers[VULKAN_DEVICE_QUEUE_TYPE_COMPUTE][image_index];
     beginCommandBuffer(compute_command_buffer, 0);
 
-    vkCmdBindPipeline(compute_command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE, compute_pipeline.handle);
+    vkCmdBindPipeline(compute_command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE,
+                      compute_pipeline.handle);
     vkCmdBindDescriptorSets(
-      compute_command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE,
-      compute_pipeline.layout, 0, 1, &compute_texture_descriptor_set, 0, 0);
-    vkCmdDispatch(compute_command_buffer, texture.width / 16, texture.height / 16, 1);
+        compute_command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE,
+        compute_pipeline.layout, 0, 1, &compute_texture_descriptor_set, 0, 0);
+    vkCmdDispatch(compute_command_buffer, texture.width / 16,
+                  texture.height / 16, 1);
 
     vkEndCommandBuffer(compute_command_buffer);
 
@@ -417,20 +426,17 @@ int main(int argc, char **argv) {
     image_memory_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     image_memory_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     image_memory_barrier.image = texture.handle;
-    image_memory_barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    image_memory_barrier.subresourceRange.aspectMask =
+        VK_IMAGE_ASPECT_COLOR_BIT;
     image_memory_barrier.subresourceRange.baseMipLevel = 0;
     image_memory_barrier.subresourceRange.levelCount = 1;
     image_memory_barrier.subresourceRange.baseArrayLayer = 0;
     image_memory_barrier.subresourceRange.layerCount = 1;
 
-    vkCmdPipelineBarrier(
-      graphics_command_buffer,
-      VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-      VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-      0,
-      0, nullptr,
-      0, nullptr,
-      1, &image_memory_barrier);
+    vkCmdPipelineBarrier(graphics_command_buffer,
+                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                         VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr,
+                         0, nullptr, 1, &image_memory_barrier);
 
     glm::vec4 clear_color = {0, 0, 0, 1};
     VkClearValue clear_value = {};
@@ -543,7 +549,8 @@ int main(int argc, char **argv) {
 
   vkDeviceWaitIdle(device.logical_device);
 
-  vkDestroyDescriptorSetLayout(device.logical_device, compute_descriptor_set_layout, 0);
+  vkDestroyDescriptorSetLayout(device.logical_device,
+                               compute_descriptor_set_layout, 0);
 
   destroyPipeline(&compute_pipeline, &device);
 

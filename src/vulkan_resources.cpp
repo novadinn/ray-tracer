@@ -160,7 +160,8 @@ bool createDescriptorSetLayout(
   return true;
 }
 
-bool createDescriptorPool(VulkanDevice *device, VkDescriptorPool *out_descriptor_pool) {
+bool createDescriptorPool(VulkanDevice *device,
+                          VkDescriptorPool *out_descriptor_pool) {
   const uint32_t size_count = 1000;
   const std::vector<std::pair<VkDescriptorType, float>> pool_sizes = {
       {VK_DESCRIPTOR_TYPE_SAMPLER, 0.5f},
@@ -190,21 +191,27 @@ bool createDescriptorPool(VulkanDevice *device, VkDescriptorPool *out_descriptor
   descriptor_pool_create_info.pPoolSizes = sizes.data();
 
   VK_CHECK(vkCreateDescriptorPool(device->logical_device,
-                                  &descriptor_pool_create_info,
-                                  0, out_descriptor_pool));
+                                  &descriptor_pool_create_info, 0,
+                                  out_descriptor_pool));
 
   return true;
 }
 
-bool allocateDescriptorSet(VulkanDevice *device, VkDescriptorPool descriptor_pool, VkDescriptorSetLayout layout, VkDescriptorSet *out_descriptor_set) {
+bool allocateDescriptorSet(VulkanDevice *device,
+                           VkDescriptorPool descriptor_pool,
+                           VkDescriptorSetLayout layout,
+                           VkDescriptorSet *out_descriptor_set) {
   VkDescriptorSetAllocateInfo descriptor_set_allocate_info = {};
-  descriptor_set_allocate_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+  descriptor_set_allocate_info.sType =
+      VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
   descriptor_set_allocate_info.pNext = 0;
   descriptor_set_allocate_info.descriptorPool = descriptor_pool;
   descriptor_set_allocate_info.descriptorSetCount = 1;
   descriptor_set_allocate_info.pSetLayouts = &layout;
 
-  VK_CHECK(vkAllocateDescriptorSets(device->logical_device, &descriptor_set_allocate_info, out_descriptor_set));
+  VK_CHECK(vkAllocateDescriptorSets(device->logical_device,
+                                    &descriptor_set_allocate_info,
+                                    out_descriptor_set));
 
   return true;
 }

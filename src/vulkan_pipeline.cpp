@@ -156,8 +156,9 @@ bool createGraphicsPipeline(
   return true;
 }
 
-bool createComputePipeline(VulkanDevice *device, 
-    std::vector<VkDescriptorSetLayout> descriptor_set_layouts, 
+bool createComputePipeline(
+    VulkanDevice *device,
+    std::vector<VkDescriptorSetLayout> descriptor_set_layouts,
     VkPipelineShaderStageCreateInfo stage, VulkanPipeline *out_pipeline) {
   VkPipelineLayoutCreateInfo pipeline_layout_create_info = {};
   pipeline_layout_create_info.sType =
@@ -181,8 +182,10 @@ bool createComputePipeline(VulkanDevice *device,
   pipeline_create_info.layout = out_pipeline->layout;
   pipeline_create_info.basePipelineHandle = 0;
   pipeline_create_info.basePipelineIndex = -1;
-  
-  VK_CHECK(vkCreateComputePipelines(device->logical_device, 0, 1, &pipeline_create_info, 0, &out_pipeline->handle));
+
+  VK_CHECK(vkCreateComputePipelines(device->logical_device, 0, 1,
+                                    &pipeline_create_info, 0,
+                                    &out_pipeline->handle));
 
   return true;
 }

@@ -1,8 +1,8 @@
 #include "vulkan_device.h"
 
 #include "logger.h"
-#include "vulkan_common.h"
 #include "platform.h"
+#include "vulkan_common.h"
 
 #include <set>
 #include <string.h>
