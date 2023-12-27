@@ -71,6 +71,7 @@ file(GLOB_RECURSE VK_GLSL_SOURCE_FILES
   "assets/shaders/*.tese"
   "assets/shaders/*.geom"
   "assets/shaders/*.frag"
+  "assets/shaders/*.comp"
 )
 set(GLSLANG "glslangValidator")
 foreach(GLSL ${VK_GLSL_SOURCE_FILES})

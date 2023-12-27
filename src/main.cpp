@@ -275,15 +275,40 @@ int main(int argc, char **argv) {
   }
 
   VulkanTexture texture;
-  if (!loadTexture(
-          "assets/textures/brickwall.jpg", &device, vma_allocator,
-          queues[VULKAN_DEVICE_QUEUE_TYPE_GRAPHICS],
-          command_pools[VULKAN_DEVICE_QUEUE_TYPE_GRAPHICS],
-          device.queue_family_indices[VULKAN_DEVICE_QUEUE_TYPE_GRAPHICS],
-          &texture)) {
-    FATAL("Failed to load a texture!");
+  if (!createTexture(&device, vma_allocator, VK_FORMAT_R8G8B8A8_UNORM, 800, 600,
+                     VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT,
+                     &texture)) {
+    FATAL("Failed to create a texture!")
     exit(1);
   }
+  VkCommandBuffer temp_command_buffer;
+  if (!allocateAndBeginSingleUseCommandBuffer(
+          &device, command_pools[VULKAN_DEVICE_QUEUE_TYPE_GRAPHICS],
+          &temp_command_buffer)) {
+    ERROR("Failed to allocate a temp command buffer!");
+    return false;
+  }
+  if (!transitionTextureLayout(
+          &texture, temp_command_buffer, VK_IMAGE_LAYOUT_UNDEFINED,
+          VK_IMAGE_LAYOUT_GENERAL,
+          device.queue_family_indices[VULKAN_DEVICE_QUEUE_TYPE_GRAPHICS])) {
+    ERROR("Failed to transition image layout!");
+    return false;
+  }
+  endAndFreeSingleUseCommandBuffer(
+      temp_command_buffer, &device,
+      command_pools[VULKAN_DEVICE_QUEUE_TYPE_GRAPHICS],
+      queues[VULKAN_DEVICE_QUEUE_TYPE_GRAPHICS]);
+
+  // if (!loadTexture(
+  //         "assets/textures/brickwall.jpg", &device, vma_allocator,
+  //         queues[VULKAN_DEVICE_QUEUE_TYPE_GRAPHICS],
+  //         command_pools[VULKAN_DEVICE_QUEUE_TYPE_GRAPHICS],
+  //         device.queue_family_indices[VULKAN_DEVICE_QUEUE_TYPE_GRAPHICS],
+  //         &texture)) {
+  //   FATAL("Failed to load a texture!");
+  //   exit(1);
+  // }
 
   VkDescriptorImageInfo descriptor_image_info = {};
   descriptor_image_info.sampler = texture.sampler;
@@ -785,6 +810,9 @@ bool loadTexture(const char *path, VulkanDevice *device,
   }
 
   createTexture(device, vma_allocator, VK_FORMAT_R8G8B8A8_SRGB, texture_width,
+                VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                    VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+                    VK_IMAGE_USAGE_SAMPLED_BIT,
                 texture_height, out_texture);
   writeTextureData(out_texture, device, data, vma_allocator, queue,
                    command_pool, queue_family_index);
