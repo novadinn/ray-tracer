@@ -348,6 +348,21 @@ int main(int argc, char **argv) {
                      VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
                      &descriptor_image_info, 0);
 
+  VkDescriptorSet compute_texture_descriptor_set;
+  if (!allocateDescriptorSet(&device, descriptor_pool, compute_descriptor_set_layout,
+                             &compute_texture_descriptor_set)) {
+    FATAL("Failed to create a descriptor set!");
+    exit(1);
+  }
+
+  VkDescriptorImageInfo compute_descriptor_image_info = {};
+  compute_descriptor_image_info.sampler = texture.sampler;
+  compute_descriptor_image_info.imageView = texture.view;
+  compute_descriptor_image_info.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+  writeDescriptorSet(&device, compute_texture_descriptor_set, 0,
+                     VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+                     &compute_descriptor_image_info, 0);
+
   bool running = true;
   while (running) {
     SDL_Event event;
@@ -369,6 +384,18 @@ int main(int argc, char **argv) {
     }
 
     vkDeviceWaitIdle(device.logical_device);
+
+    VkCommandBuffer compute_command_buffer = command_buffers[VULKAN_DEVICE_QUEUE_TYPE_COMPUTE][image_index];
+    beginCommandBuffer(compute_command_buffer, 0);
+
+    vkCmdBindPipeline(compute_command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE, compute_pipeline.handle);
+    vkCmdBindDescriptorSets(
+      compute_command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE,
+      compute_pipeline.layout, 0, 1, &compute_texture_descriptor_set, 0, 0);
+    vkCmdDispatch(compute_command_buffer, texture.width / 16, texture.height / 16, 1);
+
+    vkEndCommandBuffer(compute_command_buffer);
+
     vkWaitForFences(device.logical_device, 1, &in_flight_fences[current_frame],
                     true, UINT64_MAX);
 
@@ -379,6 +406,31 @@ int main(int argc, char **argv) {
     VkCommandBuffer graphics_command_buffer =
         command_buffers[VULKAN_DEVICE_QUEUE_TYPE_GRAPHICS][image_index];
     beginCommandBuffer(graphics_command_buffer, 0);
+
+    VkImageMemoryBarrier image_memory_barrier = {};
+    image_memory_barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    image_memory_barrier.pNext = 0;
+    image_memory_barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+    image_memory_barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    image_memory_barrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+    image_memory_barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+    image_memory_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    image_memory_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    image_memory_barrier.image = texture.handle;
+    image_memory_barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    image_memory_barrier.subresourceRange.baseMipLevel = 0;
+    image_memory_barrier.subresourceRange.levelCount = 1;
+    image_memory_barrier.subresourceRange.baseArrayLayer = 0;
+    image_memory_barrier.subresourceRange.layerCount = 1;
+
+    vkCmdPipelineBarrier(
+      graphics_command_buffer,
+      VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+      VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+      0,
+      0, nullptr,
+      0, nullptr,
+      1, &image_memory_barrier);
 
     glm::vec4 clear_color = {0, 0, 0, 1};
     VkClearValue clear_value = {};
@@ -420,13 +472,13 @@ int main(int argc, char **argv) {
 
     vkCmdSetScissor(graphics_command_buffer, 0, 1, &scissor);
 
-    // vkCmdBindPipeline(graphics_command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-    //                   graphics_pipeline.handle);
-    // vkCmdBindDescriptorSets(
-    //     graphics_command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-    //     graphics_pipeline.layout, 0, 1, &texture_descriptor_set, 0, 0);
+    vkCmdBindPipeline(graphics_command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                      graphics_pipeline.handle);
+    vkCmdBindDescriptorSets(
+        graphics_command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+        graphics_pipeline.layout, 0, 1, &texture_descriptor_set, 0, 0);
 
-    // vkCmdDraw(graphics_command_buffer, 4, 1, 0, 0);
+    vkCmdDraw(graphics_command_buffer, 4, 1, 0, 0);
 
     vkCmdEndRenderPass(graphics_command_buffer);
 
