@@ -156,6 +156,37 @@ bool createGraphicsPipeline(
   return true;
 }
 
+bool createComputePipeline(VulkanDevice *device, 
+    std::vector<VkDescriptorSetLayout> descriptor_set_layouts, 
+    VkPipelineShaderStageCreateInfo stage, VulkanPipeline *out_pipeline) {
+  VkPipelineLayoutCreateInfo pipeline_layout_create_info = {};
+  pipeline_layout_create_info.sType =
+      VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+  pipeline_layout_create_info.pNext = 0;
+  pipeline_layout_create_info.flags = 0;
+  pipeline_layout_create_info.setLayoutCount = descriptor_set_layouts.size();
+  pipeline_layout_create_info.pSetLayouts = descriptor_set_layouts.data();
+  pipeline_layout_create_info.pushConstantRangeCount = 0;
+  pipeline_layout_create_info.pPushConstantRanges = 0;
+
+  VK_CHECK(vkCreatePipelineLayout(device->logical_device,
+                                  &pipeline_layout_create_info, 0,
+                                  &out_pipeline->layout));
+
+  VkComputePipelineCreateInfo pipeline_create_info = {};
+  pipeline_create_info.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+  pipeline_create_info.pNext = 0;
+  pipeline_create_info.flags = 0;
+  pipeline_create_info.stage = stage;
+  pipeline_create_info.layout = out_pipeline->layout;
+  pipeline_create_info.basePipelineHandle = 0;
+  pipeline_create_info.basePipelineIndex = -1;
+  
+  VK_CHECK(vkCreateComputePipelines(device->logical_device, 0, 1, &pipeline_create_info, 0, &out_pipeline->handle));
+
+  return true;
+}
+
 void destroyPipeline(VulkanPipeline *pipeline, VulkanDevice *device) {
   vkDestroyPipeline(device->logical_device, pipeline->handle, 0);
   vkDestroyPipelineLayout(device->logical_device, pipeline->layout, 0);

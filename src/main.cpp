@@ -267,6 +267,36 @@ int main(int argc, char **argv) {
   vkDestroyShaderModule(device.logical_device, texture_fragment_shader_module,
                         0);
 
+  VkShaderModule compute_shader_module;
+  if(!createShaderModule(&device, "assets/shaders/ray_tracing.comp.spv", &compute_shader_module)) {
+    FATAL("Failed to create a compute shader module!");
+    exit(1);
+  }
+
+  VkDescriptorSetLayoutBinding compute_descriptor_set_layout_binding =
+    descriptorSetLayoutBinding(0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+                                VK_SHADER_STAGE_COMPUTE_BIT);
+
+  VkDescriptorSetLayout compute_descriptor_set_layout;
+  if (!createDescriptorSetLayout(&device,
+                                 std::vector<VkDescriptorSetLayoutBinding>{
+                                     compute_descriptor_set_layout_binding},
+                                 &compute_descriptor_set_layout)) {
+    FATAL("Failed to create a descriptor set layout!");
+    exit(1);
+  }
+
+  VkPipelineShaderStageCreateInfo compute_stage_create_info = 
+      pipelineShaderStageCreateInfo(VK_SHADER_STAGE_COMPUTE_BIT, compute_shader_module);
+
+  VulkanPipeline compute_pipeline;
+  if(!createComputePipeline(&device, std::vector<VkDescriptorSetLayout>{compute_descriptor_set_layout}, compute_stage_create_info, &compute_pipeline)) {
+    FATAL("Failed to create a compute pipeline!");
+    exit(1);
+  }
+
+  vkDestroyShaderModule(device.logical_device, compute_shader_module, 0);
+
   VkDescriptorSet texture_descriptor_set;
   if (!allocateDescriptorSet(&device, descriptor_pool, descriptor_set_layout,
                              &texture_descriptor_set)) {
@@ -286,14 +316,14 @@ int main(int argc, char **argv) {
           &device, command_pools[VULKAN_DEVICE_QUEUE_TYPE_GRAPHICS],
           &temp_command_buffer)) {
     ERROR("Failed to allocate a temp command buffer!");
-    return false;
+    exit(1);
   }
   if (!transitionTextureLayout(
           &texture, temp_command_buffer, VK_IMAGE_LAYOUT_UNDEFINED,
           VK_IMAGE_LAYOUT_GENERAL,
           device.queue_family_indices[VULKAN_DEVICE_QUEUE_TYPE_GRAPHICS])) {
     ERROR("Failed to transition image layout!");
-    return false;
+    exit(1);
   }
   endAndFreeSingleUseCommandBuffer(
       temp_command_buffer, &device,
@@ -350,7 +380,7 @@ int main(int argc, char **argv) {
         command_buffers[VULKAN_DEVICE_QUEUE_TYPE_GRAPHICS][image_index];
     beginCommandBuffer(graphics_command_buffer, 0);
 
-    glm::vec4 clear_color = {1, 0, 0, 1};
+    glm::vec4 clear_color = {0, 0, 0, 1};
     VkClearValue clear_value = {};
     clear_value.color.float32[0] = clear_color.r;
     clear_value.color.float32[1] = clear_color.g;
@@ -390,13 +420,13 @@ int main(int argc, char **argv) {
 
     vkCmdSetScissor(graphics_command_buffer, 0, 1, &scissor);
 
-    vkCmdBindPipeline(graphics_command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                      graphics_pipeline.handle);
-    vkCmdBindDescriptorSets(
-        graphics_command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-        graphics_pipeline.layout, 0, 1, &texture_descriptor_set, 0, 0);
+    // vkCmdBindPipeline(graphics_command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+    //                   graphics_pipeline.handle);
+    // vkCmdBindDescriptorSets(
+    //     graphics_command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+    //     graphics_pipeline.layout, 0, 1, &texture_descriptor_set, 0, 0);
 
-    vkCmdDraw(graphics_command_buffer, 4, 1, 0, 0);
+    // vkCmdDraw(graphics_command_buffer, 4, 1, 0, 0);
 
     vkCmdEndRenderPass(graphics_command_buffer);
 
@@ -460,6 +490,10 @@ int main(int argc, char **argv) {
   }
 
   vkDeviceWaitIdle(device.logical_device);
+
+  vkDestroyDescriptorSetLayout(device.logical_device, compute_descriptor_set_layout, 0);
+
+  destroyPipeline(&compute_pipeline, &device);
 
   destroyTexture(&texture, &device, vma_allocator);
 
