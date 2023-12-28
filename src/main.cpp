@@ -7,6 +7,7 @@
 #include "vulkan_resources.h"
 #include "vulkan_swapchain.h"
 #include "vulkan_texture.h"
+#include "vulkan_descriptor_allocator.h"
 
 #include "glm/glm.hpp"
 #include <SDL2/SDL.h>
@@ -70,7 +71,7 @@ int main(int argc, char **argv) {
   }
 
   const uint32_t window_width = 800;
-  const uint32_t window_height = 600;
+  const uint32_t window_height = 608;
 
   window = SDL_CreateWindow(
       "Ray tracer", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED,
@@ -328,7 +329,7 @@ int main(int argc, char **argv) {
   }
 
   VulkanTexture texture;
-  if (!createTexture(&device, vma_allocator, VK_FORMAT_R8G8B8A8_UNORM, 800, 600,
+  if (!createTexture(&device, vma_allocator, VK_FORMAT_R8G8B8A8_UNORM, window_width, window_height,
                      VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT,
                      &texture)) {
     FATAL("Failed to create a texture!")
