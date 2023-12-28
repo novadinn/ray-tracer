@@ -202,21 +202,33 @@ int main(int argc, char **argv) {
 
   std::vector<VkSemaphore> image_available_semaphores;
   image_available_semaphores.resize(swapchain.max_frames_in_flight);
-  std::vector<VkSemaphore> queue_complete_semaphores;
-  queue_complete_semaphores.resize(swapchain.max_frames_in_flight);
+  std::vector<VkSemaphore> render_finished_semaphores;
+  render_finished_semaphores.resize(swapchain.max_frames_in_flight);
   std::vector<VkFence> in_flight_fences;
   in_flight_fences.resize(swapchain.max_frames_in_flight);
+  std::vector<VkSemaphore> compute_finished_semaphores;
+  compute_finished_semaphores.resize(swapchain.max_frames_in_flight);
+  std::vector<VkFence> compute_in_flight_fences;
+  compute_in_flight_fences.resize(swapchain.max_frames_in_flight);
   for (uint32_t i = 0; i < swapchain.max_frames_in_flight; ++i) {
     if (!createSemaphore(&device, &image_available_semaphores[i])) {
       FATAL("Failed to create a semaphore!");
       exit(1);
     }
-    if (!createSemaphore(&device, &queue_complete_semaphores[i])) {
+    if (!createSemaphore(&device, &render_finished_semaphores[i])) {
       FATAL("Failed to create a semaphore!");
       exit(1);
     }
-
     if (!createFence(&device, &in_flight_fences[i])) {
+      FATAL("Failed to create a fence!");
+      exit(1);
+    }
+
+    if (!createSemaphore(&device, &compute_finished_semaphores[i])) {
+      FATAL("Failed to create a semaphore!");
+      exit(1);
+    }
+    if (!createFence(&device, &compute_in_flight_fences[i])) {
       FATAL("Failed to create a fence!");
       exit(1);
     }
@@ -383,6 +395,12 @@ int main(int argc, char **argv) {
 
     vkDeviceWaitIdle(device.logical_device);
 
+    vkWaitForFences(device.logical_device, 1,
+                    &compute_in_flight_fences[current_frame], VK_TRUE,
+                    UINT64_MAX);
+    vkResetFences(device.logical_device, 1,
+                  &compute_in_flight_fences[current_frame]);
+
     VkCommandBuffer compute_command_buffer =
         compute_command_buffers[current_frame];
     beginCommandBuffer(compute_command_buffer, 0);
@@ -397,8 +415,32 @@ int main(int argc, char **argv) {
 
     vkEndCommandBuffer(compute_command_buffer);
 
+    VkPipelineStageFlags wait_dst_stage_mask =
+        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
+
+    VkSubmitInfo compute_submit_info = {};
+    compute_submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    compute_submit_info.pNext = 0;
+    compute_submit_info.waitSemaphoreCount = 0;
+    compute_submit_info.pWaitSemaphores = 0;
+    compute_submit_info.pWaitDstStageMask = &wait_dst_stage_mask;
+    compute_submit_info.commandBufferCount = 1;
+    compute_submit_info.pCommandBuffers =
+        &compute_command_buffers[current_frame];
+    compute_submit_info.signalSemaphoreCount = 1;
+    compute_submit_info.pSignalSemaphores =
+        &compute_finished_semaphores[current_frame];
+
+    VkResult result = vkQueueSubmit(compute_queue, 1, &compute_submit_info,
+                                    compute_in_flight_fences[current_frame]);
+    if (result != VK_SUCCESS) {
+      ERROR("Vulkan queue submit failed.");
+    }
+
     vkWaitForFences(device.logical_device, 1, &in_flight_fences[current_frame],
                     true, UINT64_MAX);
+    VK_CHECK(vkResetFences(device.logical_device, 1,
+                           &in_flight_fences[current_frame]));
 
     uint32_t image_index = 0;
     vkAcquireNextImageKHR(device.logical_device, swapchain.handle, UINT64_MAX,
@@ -471,42 +513,38 @@ int main(int argc, char **argv) {
 
     vkCmdSetScissor(graphics_command_buffer, 0, 1, &scissor);
 
-    // vkCmdBindPipeline(graphics_command_buffer,
-    // VK_PIPELINE_BIND_POINT_GRAPHICS,
-    //                   graphics_pipeline.handle);
-    // vkCmdBindDescriptorSets(
-    //     graphics_command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-    //     graphics_pipeline.layout, 0, 1, &texture_descriptor_set, 0, 0);
+    vkCmdBindPipeline(graphics_command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                      graphics_pipeline.handle);
+    vkCmdBindDescriptorSets(
+        graphics_command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+        graphics_pipeline.layout, 0, 1, &texture_descriptor_set, 0, 0);
 
-    // vkCmdDraw(graphics_command_buffer, 4, 1, 0, 0);
+    vkCmdDraw(graphics_command_buffer, 4, 1, 0, 0);
 
     vkCmdEndRenderPass(graphics_command_buffer);
 
     VK_CHECK(vkEndCommandBuffer(graphics_command_buffer));
 
-    vkWaitForFences(device.logical_device, 1, &in_flight_fences[current_frame],
-                    true, UINT64_MAX);
-
-    VK_CHECK(vkResetFences(device.logical_device, 1,
-                           &in_flight_fences[current_frame]));
-
-    VkPipelineStageFlags wait_dst_stage_mask =
-        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    VkPipelineStageFlags wait_dst_stage_masks[2] = {
+        VK_PIPELINE_STAGE_VERTEX_INPUT_BIT,
+        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
+    std::vector<VkSemaphore> wait_semaphores = {
+        compute_finished_semaphores[current_frame],
+        image_available_semaphores[current_frame]};
 
     VkSubmitInfo submit_info = {};
     submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     submit_info.pNext = 0;
-    submit_info.waitSemaphoreCount = 1;
-    submit_info.pWaitSemaphores = &image_available_semaphores[current_frame];
-    submit_info.pWaitDstStageMask = 0;
+    submit_info.waitSemaphoreCount = wait_semaphores.size();
+    submit_info.pWaitSemaphores = wait_semaphores.data();
     submit_info.commandBufferCount = 1;
     submit_info.pCommandBuffers = &graphics_command_buffer;
     submit_info.signalSemaphoreCount = 1;
-    submit_info.pSignalSemaphores = &queue_complete_semaphores[current_frame];
-    submit_info.pWaitDstStageMask = &wait_dst_stage_mask;
+    submit_info.pSignalSemaphores = &render_finished_semaphores[current_frame];
+    submit_info.pWaitDstStageMask = wait_dst_stage_masks;
 
-    VkResult result = vkQueueSubmit(graphics_queue, 1, &submit_info,
-                                    in_flight_fences[current_frame]);
+    result = vkQueueSubmit(graphics_queue, 1, &submit_info,
+                           in_flight_fences[current_frame]);
     if (result != VK_SUCCESS) {
       ERROR("Vulkan queue submit failed.");
     }
@@ -515,7 +553,7 @@ int main(int argc, char **argv) {
     present_info.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
     present_info.pNext = 0;
     present_info.waitSemaphoreCount = 1;
-    present_info.pWaitSemaphores = &queue_complete_semaphores[current_frame];
+    present_info.pWaitSemaphores = &render_finished_semaphores[current_frame];
     present_info.swapchainCount = 1;
     present_info.pSwapchains = &swapchain.handle;
     present_info.pImageIndices = &image_index;
@@ -557,8 +595,11 @@ int main(int argc, char **argv) {
 
   for (uint32_t i = 0; i < swapchain.max_frames_in_flight; ++i) {
     vkDestroySemaphore(device.logical_device, image_available_semaphores[i], 0);
-    vkDestroySemaphore(device.logical_device, queue_complete_semaphores[i], 0);
+    vkDestroySemaphore(device.logical_device, render_finished_semaphores[i], 0);
     vkDestroyFence(device.logical_device, in_flight_fences[i], 0);
+    vkDestroySemaphore(device.logical_device, compute_finished_semaphores[i],
+                       0);
+    vkDestroyFence(device.logical_device, compute_in_flight_fences[i], 0);
   }
   for (uint32_t i = 0; i < framebuffers.size(); ++i) {
     vkDestroyFramebuffer(device.logical_device, framebuffers[i], 0);
