@@ -352,7 +352,7 @@ int main(int argc, char **argv) {
   VkDescriptorImageInfo descriptor_image_info = {};
   descriptor_image_info.sampler = texture.sampler;
   descriptor_image_info.imageView = texture.view;
-  descriptor_image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+  descriptor_image_info.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
   writeDescriptorSet(&device, texture_descriptor_set, 0,
                      VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
                      &descriptor_image_info, 0);
@@ -365,13 +365,9 @@ int main(int argc, char **argv) {
     exit(1);
   }
 
-  VkDescriptorImageInfo compute_descriptor_image_info = {};
-  compute_descriptor_image_info.sampler = texture.sampler;
-  compute_descriptor_image_info.imageView = texture.view;
-  compute_descriptor_image_info.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
   writeDescriptorSet(&device, compute_texture_descriptor_set, 0,
                      VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-                     &compute_descriptor_image_info, 0);
+                     &descriptor_image_info, 0);
 
   bool running = true;
   while (running) {
