@@ -80,7 +80,6 @@ int main(int argc, char **argv) {
     exit(1);
   }
 
-  uint32_t image_index = 0;
   uint32_t current_frame = 0;
 
   VkApplicationInfo application_info = {};
@@ -221,12 +220,6 @@ int main(int argc, char **argv) {
       FATAL("Failed to create a fence!");
       exit(1);
     }
-  }
-
-  std::vector<VkFence *> images_in_flight;
-  images_in_flight.resize(swapchain.images.size());
-  for (uint32_t i = 0; i < images_in_flight.size(); ++i) {
-    images_in_flight[i] = 0;
   }
 
   VkDescriptorPool descriptor_pool;
@@ -391,7 +384,7 @@ int main(int argc, char **argv) {
     vkDeviceWaitIdle(device.logical_device);
 
     VkCommandBuffer compute_command_buffer =
-        compute_command_buffers[image_index];
+        compute_command_buffers[current_frame];
     beginCommandBuffer(compute_command_buffer, 0);
 
     vkCmdBindPipeline(compute_command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE,
@@ -407,12 +400,13 @@ int main(int argc, char **argv) {
     vkWaitForFences(device.logical_device, 1, &in_flight_fences[current_frame],
                     true, UINT64_MAX);
 
+    uint32_t image_index = 0;
     vkAcquireNextImageKHR(device.logical_device, swapchain.handle, UINT64_MAX,
                           image_available_semaphores[current_frame], 0,
                           &image_index);
 
     VkCommandBuffer graphics_command_buffer =
-        graphics_command_buffers[image_index];
+        graphics_command_buffers[current_frame];
     beginCommandBuffer(graphics_command_buffer, 0);
 
     VkImageMemoryBarrier image_memory_barrier = {};
@@ -490,15 +484,9 @@ int main(int argc, char **argv) {
 
     VK_CHECK(vkEndCommandBuffer(graphics_command_buffer));
 
-    /* make sure the previous frame is not using this image (its fence is
-     * being waited on) */
-    if (images_in_flight[image_index] != 0) {
-      vkWaitForFences(device.logical_device, 1, images_in_flight[image_index],
-                      true, UINT64_MAX);
-    }
+    vkWaitForFences(device.logical_device, 1, &in_flight_fences[current_frame],
+                    true, UINT64_MAX);
 
-    /* mark the image fence as in-use by this frame */
-    images_in_flight[image_index] = &in_flight_fences[current_frame];
     VK_CHECK(vkResetFences(device.logical_device, 1,
                            &in_flight_fences[current_frame]));
 
