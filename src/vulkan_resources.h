@@ -25,15 +25,3 @@ bool createFence(VulkanDevice *device, VkFence *out_fence);
 
 bool createShaderModule(VulkanDevice *device, const char *path,
                         VkShaderModule *out_shader_module);
-
-bool createDescriptorSetLayout(
-    VulkanDevice *device,
-    std::vector<VkDescriptorSetLayoutBinding> descriptor_set_layout_bindings,
-    VkDescriptorSetLayout *out_descriptor_set_layout);
-
-bool createDescriptorPool(VulkanDevice *device,
-                          VkDescriptorPool *out_descriptor_pool);
-bool allocateDescriptorSet(VulkanDevice *device,
-                           VkDescriptorPool descriptor_pool,
-                           VkDescriptorSetLayout layout,
-                           VkDescriptorSet *out_descriptor_set);

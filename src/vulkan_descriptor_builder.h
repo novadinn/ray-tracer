@@ -22,3 +22,4 @@ void bindDescriptorBuilderImage(uint32_t binding,
                                 VkShaderStageFlags stage_flags, 
                                 VulkanDescriptorBuilder *out_descriptor_builder);
 bool endDescriptorBuilder(VulkanDescriptorBuilder *descriptor_builder, VulkanDevice *device, VkDescriptorSet *out_set, VkDescriptorSetLayout *out_layout);
+bool endDescriptorBuilder(VulkanDescriptorBuilder *descriptor_builder, VulkanDevice *device, VkDescriptorSet *out_set);

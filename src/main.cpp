@@ -8,6 +8,8 @@
 #include "vulkan_swapchain.h"
 #include "vulkan_texture.h"
 #include "vulkan_descriptor_allocator.h"
+#include "vulkan_descriptor_layout_cache.h"
+#include "vulkan_descriptor_builder.h"
 
 #include "glm/glm.hpp"
 #include <SDL2/SDL.h>
@@ -54,10 +56,6 @@ descriptorSetLayoutBinding(uint32_t binding, VkDescriptorType descriptor_type,
 VkPipelineShaderStageCreateInfo
 pipelineShaderStageCreateInfo(VkShaderStageFlagBits stage_flag,
                               VkShaderModule shader_module);
-void writeDescriptorSet(VulkanDevice *device, VkDescriptorSet descriptor_set,
-                        uint32_t binding, VkDescriptorType descriptor_type,
-                        VkDescriptorImageInfo *image_info,
-                        VkDescriptorBufferInfo *buffer_info);
 bool loadTexture(const char *path, VulkanDevice *device,
                  VmaAllocator vma_allocator, VkQueue queue,
                  VkCommandPool command_pool, uint32_t queue_family_index,
@@ -235,9 +233,12 @@ int main(int argc, char **argv) {
     }
   }
 
-  VkDescriptorPool descriptor_pool;
-  if (!createDescriptorPool(&device, &descriptor_pool)) {
-    FATAL("Failed to create a descriptor pool!");
+  if(!initializeDescriptorAllocator()) {
+    FATAL("Failed to initialize a descriptor allocator!");
+    exit(1);
+  }
+  if(!initializeDescriptorLayoutCache()) {
+    FATAL("Failed to inititalize a descriptor layout cache!");
     exit(1);
   }
 
@@ -257,15 +258,13 @@ int main(int argc, char **argv) {
   VkDescriptorSetLayoutBinding descriptor_set_layout_binding =
       descriptorSetLayoutBinding(0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
                                  VK_SHADER_STAGE_FRAGMENT_BIT);
-
-  VkDescriptorSetLayout descriptor_set_layout;
-  if (!createDescriptorSetLayout(&device,
-                                 std::vector<VkDescriptorSetLayoutBinding>{
-                                     descriptor_set_layout_binding},
-                                 &descriptor_set_layout)) {
-    FATAL("Failed to create a descriptor set layout!");
-    exit(1);
-  }
+  VkDescriptorSetLayoutCreateInfo layout_create_info = {};
+  layout_create_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+  layout_create_info.pNext = 0;
+  layout_create_info.flags = 0;
+  layout_create_info.bindingCount = 1;
+  layout_create_info.pBindings = &descriptor_set_layout_binding;
+  VkDescriptorSetLayout descriptor_set_layout = createDescriptorLayoutFromCache(&device, &layout_create_info);
 
   std::vector<VkPipelineShaderStageCreateInfo> graphics_pipeline_stages;
   graphics_pipeline_stages.emplace_back(pipelineShaderStageCreateInfo(
@@ -296,15 +295,13 @@ int main(int argc, char **argv) {
   VkDescriptorSetLayoutBinding compute_descriptor_set_layout_binding =
       descriptorSetLayoutBinding(0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
                                  VK_SHADER_STAGE_COMPUTE_BIT);
-
-  VkDescriptorSetLayout compute_descriptor_set_layout;
-  if (!createDescriptorSetLayout(&device,
-                                 std::vector<VkDescriptorSetLayoutBinding>{
-                                     compute_descriptor_set_layout_binding},
-                                 &compute_descriptor_set_layout)) {
-    FATAL("Failed to create a descriptor set layout!");
-    exit(1);
-  }
+  VkDescriptorSetLayoutCreateInfo compute_layout_create_info = {};
+  compute_layout_create_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+  compute_layout_create_info.pNext = 0;
+  compute_layout_create_info.flags = 0;
+  compute_layout_create_info.bindingCount = 1;
+  compute_layout_create_info.pBindings = &compute_descriptor_set_layout_binding;
+  VkDescriptorSetLayout compute_descriptor_set_layout = createDescriptorLayoutFromCache(&device, &compute_layout_create_info);
 
   VkPipelineShaderStageCreateInfo compute_stage_create_info =
       pipelineShaderStageCreateInfo(VK_SHADER_STAGE_COMPUTE_BIT,
@@ -320,13 +317,6 @@ int main(int argc, char **argv) {
   }
 
   vkDestroyShaderModule(device.logical_device, compute_shader_module, 0);
-
-  VkDescriptorSet texture_descriptor_set;
-  if (!allocateDescriptorSet(&device, descriptor_pool, descriptor_set_layout,
-                             &texture_descriptor_set)) {
-    FATAL("Failed to create a descriptor set!");
-    exit(1);
-  }
 
   VulkanTexture texture;
   if (!createTexture(&device, vma_allocator, VK_FORMAT_R8G8B8A8_UNORM, window_width, window_height,
@@ -354,21 +344,32 @@ int main(int argc, char **argv) {
   descriptor_image_info.sampler = texture.sampler;
   descriptor_image_info.imageView = texture.view;
   descriptor_image_info.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
-  writeDescriptorSet(&device, texture_descriptor_set, 0,
-                     VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                     &descriptor_image_info, 0);
 
-  VkDescriptorSet compute_texture_descriptor_set;
-  if (!allocateDescriptorSet(&device, descriptor_pool,
-                             compute_descriptor_set_layout,
-                             &compute_texture_descriptor_set)) {
+  VulkanDescriptorBuilder descriptor_builder;
+
+  VkDescriptorSet texture_descriptor_set;
+  if(!beginDescriptorBuilder(&descriptor_builder)) {
     FATAL("Failed to create a descriptor set!");
     exit(1);
   }
+  bindDescriptorBuilderImage(0, &descriptor_image_info, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT, &descriptor_builder);
+  if(!endDescriptorBuilder(&descriptor_builder, &device, &texture_descriptor_set)) {
+    FATAL("Failed to create a descriptor set!");
+    exit(1);
+  }
+  
+  descriptor_builder = {};
 
-  writeDescriptorSet(&device, compute_texture_descriptor_set, 0,
-                     VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-                     &descriptor_image_info, 0);
+  VkDescriptorSet compute_texture_descriptor_set;
+  if(!beginDescriptorBuilder(&descriptor_builder)) {
+    FATAL("Failed to create a descriptor set!");
+    exit(1);
+  }
+  bindDescriptorBuilderImage(0, &descriptor_image_info, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_SHADER_STAGE_COMPUTE_BIT, &descriptor_builder);
+  if(!endDescriptorBuilder(&descriptor_builder, &device, &compute_texture_descriptor_set)) {
+    FATAL("Failed to create a descriptor set!");
+    exit(1);
+  }
 
   bool running = true;
   while (running) {
@@ -568,18 +569,15 @@ int main(int argc, char **argv) {
 
   vkDeviceWaitIdle(device.logical_device);
 
-  vkDestroyDescriptorSetLayout(device.logical_device,
-                               compute_descriptor_set_layout, 0);
+  shutdownDescriptorLayoutCache(&device);
 
   destroyPipeline(&compute_pipeline, &device);
 
   destroyTexture(&texture, &device, vma_allocator);
 
-  vkDestroyDescriptorPool(device.logical_device, descriptor_pool, 0);
+  shutdownDescriptorAllocator(&device);
 
   destroyPipeline(&graphics_pipeline, &device);
-
-  vkDestroyDescriptorSetLayout(device.logical_device, descriptor_set_layout, 0);
 
   vkFreeCommandBuffers(device.logical_device, graphics_command_pool,
                        graphics_command_buffers.size(),
@@ -908,26 +906,6 @@ pipelineShaderStageCreateInfo(VkShaderStageFlagBits stage_flag,
   pipeline_shader_stage_create_info.pSpecializationInfo = 0;
 
   return pipeline_shader_stage_create_info;
-}
-
-void writeDescriptorSet(VulkanDevice *device, VkDescriptorSet descriptor_set,
-                        uint32_t binding, VkDescriptorType descriptor_type,
-                        VkDescriptorImageInfo *image_info,
-                        VkDescriptorBufferInfo *buffer_info) {
-  VkWriteDescriptorSet write_descriptor_set = {};
-  write_descriptor_set.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-  write_descriptor_set.pNext = 0;
-  write_descriptor_set.dstSet = descriptor_set;
-  write_descriptor_set.dstBinding = binding;
-  write_descriptor_set.dstArrayElement = 0;
-  write_descriptor_set.descriptorCount = 1;
-  write_descriptor_set.descriptorType = descriptor_type;
-  write_descriptor_set.pImageInfo = image_info;
-  write_descriptor_set.pBufferInfo = buffer_info;
-  write_descriptor_set.pTexelBufferView = 0;
-
-  vkUpdateDescriptorSets(device->logical_device, 1, &write_descriptor_set, 0,
-                         0);
 }
 
 bool loadTexture(const char *path, VulkanDevice *device,

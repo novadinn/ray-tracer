@@ -90,3 +90,8 @@ bool endDescriptorBuilder(VulkanDescriptorBuilder *descriptor_builder, VulkanDev
 
   return true;
 }
+
+bool endDescriptorBuilder(VulkanDescriptorBuilder *descriptor_builder, VulkanDevice *device, VkDescriptorSet *out_set) {
+  VkDescriptorSetLayout layout;
+  return endDescriptorBuilder(descriptor_builder, device, out_set, &layout);
+}
