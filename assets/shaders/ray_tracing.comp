@@ -6,11 +6,24 @@ layout(set = 0, binding = 0, rgba8) uniform writeonly image2D resultImage;
 #define PI 3.1415926
 #define FLT_MAX 3.402823466e+38
 #define NUM_SPHERES 4
-#define NUM_SAMPLES 20
+#define NUM_SAMPLES 100
 #define ANTI_ALIASING_FORCE 0.003
-#define NUM_BOUNCES 10
+#define NUM_BOUNCES 50
 
 uint rngState = (600 * gl_GlobalInvocationID.x + gl_GlobalInvocationID.y);
+
+#define TEXTURE_TYPE_SOLID 0
+#define TEXTURE_TYPE_CHECKER 1
+
+struct Texture {
+  int type;
+  vec3 color;
+  float invScale;
+  vec3 evenColor;
+  vec3 oddColor;
+};
+
+vec3 textureValue(Texture texture, float u, float v, vec3 point);
 
 struct Ray {
   vec3 origin;
@@ -28,6 +41,8 @@ struct Material {
   vec3 albedo;
   float fuzz;
   float ir;
+  bool textured;
+  Texture texture;
 };
 
 struct HitRecord {
@@ -36,6 +51,8 @@ struct HitRecord {
   float t;
   bool frontFace;
   Material material;
+  float u;
+  float v;
 };
 
 void hitRecordSetFaceNormal(inout HitRecord hitRecord, Ray ray,
@@ -62,6 +79,7 @@ struct Sphere {
 
 bool sphereHit(Sphere sphere, Ray ray, Interval interval,
                inout HitRecord hitRecord);
+void sphereGetUV(vec3 point, inout float u, inout float v);
 
 float lengthSquared(vec3 vector);
 float degreesToRadians(float degrees);
@@ -81,9 +99,42 @@ vec3 randomOnHemisphere(vec3 normal);
 bool worldHit(Ray ray, Interval interval, inout HitRecord hitRecord);
 vec3 rayColor(Ray ray);
 
+Sphere spheres[NUM_SPHERES];
+
 void main() {
-  /* TODO: add camera controller (+ defocus blur) */
+  /* TODO: add camera controller (+ defocus blur) + bvh */
   const vec3 camPos = vec3(0.0);
+
+  int index = 0;
+  spheres[index].center = vec3(0, 0, -1);
+  spheres[index].radius = 0.5;
+  spheres[index].material.type = MATERIAL_TYPE_LAMBEERTIAN;
+  spheres[index].material.albedo = vec3(0.1, 0.2, 0.5);
+  spheres[index].material.textured = false;
+
+  index = 1;
+  spheres[index].center = vec3(0, -100.5, -1);
+  spheres[index].radius = 100;
+  spheres[index].material.type = MATERIAL_TYPE_LAMBEERTIAN;
+  spheres[index].material.albedo = vec3(0.8, 0.8, 0.0);
+  spheres[index].material.textured = true;
+  spheres[index].material.texture.type = TEXTURE_TYPE_CHECKER;
+  spheres[index].material.texture.invScale = 1.0 / 0.32;
+  spheres[index].material.texture.evenColor = vec3(0.2, 0.3, 0.1);
+  spheres[index].material.texture.oddColor = vec3(0.9, 0.9, 0.9);
+
+  index = 2;
+  spheres[index].center = vec3(-1, 0, -1);
+  spheres[index].radius = 0.5;
+  spheres[index].material.type = MATERIAL_TYPE_DIELECTRIC;
+  spheres[index].material.ir = 1.5;
+
+  index = 3;
+  spheres[index].center = vec3(1, 0, -1);
+  spheres[index].radius = 0.5;
+  spheres[index].material.type = MATERIAL_TYPE_METAL;
+  spheres[index].material.albedo = vec3(0.8, 0.6, 0.2);
+  spheres[index].material.fuzz = 0.0;
 
   ivec2 imageSize = imageSize(resultImage);
   vec2 uv = vec2(gl_GlobalInvocationID.xy) / imageSize;
@@ -112,6 +163,29 @@ void main() {
              vec4(pixelColor, 1.0));
 }
 
+vec3 textureValue(Texture texture, float u, float v, vec3 point) {
+  switch (texture.type) {
+  case TEXTURE_TYPE_SOLID: {
+    return texture.color;
+  } break;
+  case TEXTURE_TYPE_CHECKER: {
+    int xInt = int(floor(texture.invScale * point.x));
+    int yInt = int(floor(texture.invScale * point.y));
+    int zInt = int(floor(texture.invScale * point.z));
+
+    bool isEven = (xInt + yInt + zInt) % 2 == 0;
+
+    return isEven ? texture.evenColor : texture.oddColor;
+
+  } break;
+  default: {
+    return vec3(0.0);
+  } break;
+  }
+
+  return vec3(0.0);
+}
+
 vec3 rayAt(Ray ray, float t) { return ray.origin + t * ray.dir; }
 
 void hitRecordSetFaceNormal(inout HitRecord hitRecord, Ray ray,
@@ -137,7 +211,12 @@ bool materialScatter(Material material, Ray ray, HitRecord record,
     }
     scattered.origin = record.point;
     scattered.dir = scatterDirection;
-    attenuation = material.albedo;
+    if (material.textured) {
+      attenuation =
+          textureValue(material.texture, record.u, record.v, record.point);
+    } else {
+      attenuation = material.albedo;
+    }
 
     return true;
   } break;
@@ -217,10 +296,19 @@ bool sphereHit(Sphere sphere, Ray ray, Interval interval,
   hitRecord.t = root;
   hitRecord.point = rayAt(ray, hitRecord.t);
   vec3 outwardNormal = (hitRecord.point - sphere.center) / sphere.radius;
+  sphereGetUV(outwardNormal, hitRecord.u, hitRecord.v);
   hitRecordSetFaceNormal(hitRecord, ray, outwardNormal);
   hitRecord.material = sphere.material;
 
   return true;
+}
+
+void sphereGetUV(vec3 point, inout float u, inout float v) {
+  float theta = acos(-point.y);
+  float phi = atan(point.x, -point.z) + PI;
+
+  u = phi / (2 * PI);
+  v = theta / PI;
 }
 
 float lengthSquared(vec3 vector) {
@@ -281,32 +369,6 @@ vec3 randomOnHemisphere(vec3 normal) {
 }
 
 bool worldHit(Ray ray, Interval interval, inout HitRecord hitRecord) {
-  Sphere spheres[NUM_SPHERES];
-  int index = 0;
-  spheres[index].center = vec3(0, 0, -1);
-  spheres[index].radius = 0.5;
-  spheres[index].material.type = MATERIAL_TYPE_LAMBEERTIAN;
-  spheres[index].material.albedo = vec3(0.1, 0.2, 0.5);
-
-  index = 1;
-  spheres[index].center = vec3(0, -100.5, -1);
-  spheres[index].radius = 100;
-  spheres[index].material.type = MATERIAL_TYPE_LAMBEERTIAN;
-  spheres[index].material.albedo = vec3(0.8, 0.8, 0.0);
-
-  index = 2;
-  spheres[index].center = vec3(-1, 0, -1);
-  spheres[index].radius = 0.5;
-  spheres[index].material.type = MATERIAL_TYPE_DIELECTRIC;
-  spheres[index].material.ir = 2.0;
-
-  index = 3;
-  spheres[index].center = vec3(1, 0, -1);
-  spheres[index].radius = 0.5;
-  spheres[index].material.type = MATERIAL_TYPE_METAL;
-  spheres[index].material.albedo = vec3(0.8, 0.6, 0.2);
-  spheres[index].material.fuzz = 0.0;
-
   HitRecord tempRecord;
   bool hitAnything = false;
   float closestSoFar = interval.max;
