@@ -2,14 +2,14 @@
 #include "platform.h"
 #include "vulkan_buffer.h"
 #include "vulkan_common.h"
+#include "vulkan_descriptor_allocator.h"
+#include "vulkan_descriptor_builder.h"
+#include "vulkan_descriptor_layout_cache.h"
 #include "vulkan_device.h"
 #include "vulkan_pipeline.h"
 #include "vulkan_resources.h"
 #include "vulkan_swapchain.h"
 #include "vulkan_texture.h"
-#include "vulkan_descriptor_allocator.h"
-#include "vulkan_descriptor_layout_cache.h"
-#include "vulkan_descriptor_builder.h"
 
 #include "glm/glm.hpp"
 #include <SDL2/SDL.h>
@@ -233,11 +233,11 @@ int main(int argc, char **argv) {
     }
   }
 
-  if(!initializeDescriptorAllocator()) {
+  if (!initializeDescriptorAllocator()) {
     FATAL("Failed to initialize a descriptor allocator!");
     exit(1);
   }
-  if(!initializeDescriptorLayoutCache()) {
+  if (!initializeDescriptorLayoutCache()) {
     FATAL("Failed to inititalize a descriptor layout cache!");
     exit(1);
   }
@@ -259,12 +259,14 @@ int main(int argc, char **argv) {
       descriptorSetLayoutBinding(0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
                                  VK_SHADER_STAGE_FRAGMENT_BIT);
   VkDescriptorSetLayoutCreateInfo layout_create_info = {};
-  layout_create_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+  layout_create_info.sType =
+      VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
   layout_create_info.pNext = 0;
   layout_create_info.flags = 0;
   layout_create_info.bindingCount = 1;
   layout_create_info.pBindings = &descriptor_set_layout_binding;
-  VkDescriptorSetLayout descriptor_set_layout = createDescriptorLayoutFromCache(&device, &layout_create_info);
+  VkDescriptorSetLayout descriptor_set_layout =
+      createDescriptorLayoutFromCache(&device, &layout_create_info);
 
   std::vector<VkPipelineShaderStageCreateInfo> graphics_pipeline_stages;
   graphics_pipeline_stages.emplace_back(pipelineShaderStageCreateInfo(
@@ -296,12 +298,14 @@ int main(int argc, char **argv) {
       descriptorSetLayoutBinding(0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
                                  VK_SHADER_STAGE_COMPUTE_BIT);
   VkDescriptorSetLayoutCreateInfo compute_layout_create_info = {};
-  compute_layout_create_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+  compute_layout_create_info.sType =
+      VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
   compute_layout_create_info.pNext = 0;
   compute_layout_create_info.flags = 0;
   compute_layout_create_info.bindingCount = 1;
   compute_layout_create_info.pBindings = &compute_descriptor_set_layout_binding;
-  VkDescriptorSetLayout compute_descriptor_set_layout = createDescriptorLayoutFromCache(&device, &compute_layout_create_info);
+  VkDescriptorSetLayout compute_descriptor_set_layout =
+      createDescriptorLayoutFromCache(&device, &compute_layout_create_info);
 
   VkPipelineShaderStageCreateInfo compute_stage_create_info =
       pipelineShaderStageCreateInfo(VK_SHADER_STAGE_COMPUTE_BIT,
@@ -319,7 +323,8 @@ int main(int argc, char **argv) {
   vkDestroyShaderModule(device.logical_device, compute_shader_module, 0);
 
   VulkanTexture texture;
-  if (!createTexture(&device, vma_allocator, VK_FORMAT_R8G8B8A8_UNORM, window_width, window_height,
+  if (!createTexture(&device, vma_allocator, VK_FORMAT_R8G8B8A8_UNORM,
+                     window_width, window_height,
                      VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT,
                      &texture)) {
     FATAL("Failed to create a texture!")
@@ -348,25 +353,31 @@ int main(int argc, char **argv) {
   VulkanDescriptorBuilder descriptor_builder;
 
   VkDescriptorSet texture_descriptor_set;
-  if(!beginDescriptorBuilder(&descriptor_builder)) {
+  if (!beginDescriptorBuilder(&descriptor_builder)) {
     FATAL("Failed to create a descriptor set!");
     exit(1);
   }
-  bindDescriptorBuilderImage(0, &descriptor_image_info, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT, &descriptor_builder);
-  if(!endDescriptorBuilder(&descriptor_builder, &device, &texture_descriptor_set)) {
+  bindDescriptorBuilderImage(0, &descriptor_image_info,
+                             VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                             VK_SHADER_STAGE_FRAGMENT_BIT, &descriptor_builder);
+  if (!endDescriptorBuilder(&descriptor_builder, &device,
+                            &texture_descriptor_set)) {
     FATAL("Failed to create a descriptor set!");
     exit(1);
   }
-  
+
   descriptor_builder = {};
 
   VkDescriptorSet compute_texture_descriptor_set;
-  if(!beginDescriptorBuilder(&descriptor_builder)) {
+  if (!beginDescriptorBuilder(&descriptor_builder)) {
     FATAL("Failed to create a descriptor set!");
     exit(1);
   }
-  bindDescriptorBuilderImage(0, &descriptor_image_info, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_SHADER_STAGE_COMPUTE_BIT, &descriptor_builder);
-  if(!endDescriptorBuilder(&descriptor_builder, &device, &compute_texture_descriptor_set)) {
+  bindDescriptorBuilderImage(0, &descriptor_image_info,
+                             VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+                             VK_SHADER_STAGE_COMPUTE_BIT, &descriptor_builder);
+  if (!endDescriptorBuilder(&descriptor_builder, &device,
+                            &compute_texture_descriptor_set)) {
     FATAL("Failed to create a descriptor set!");
     exit(1);
   }
