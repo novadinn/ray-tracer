@@ -5,7 +5,6 @@ layout(set = 0, binding = 0, rgba8) uniform writeonly image2D resultImage;
 
 #define PI 3.1415926
 #define FLT_MAX 3.402823466e+38
-#define NUM_SPHERES 4
 #define NUM_SAMPLES 100
 #define ANTI_ALIASING_FORCE 0.003
 #define NUM_BOUNCES 50
@@ -57,6 +56,7 @@ struct HitRecord {
 
 void hitRecordSetFaceNormal(inout HitRecord hitRecord, Ray ray,
                             vec3 outwardNormal);
+bool isInterior(float a, float b, inout HitRecord hitRecord);
 
 float reflectance(float cosine, float refIdx);
 bool materialScatter(Material material, Ray ray, HitRecord record,
@@ -71,6 +71,8 @@ bool intervalContains(Interval interval, float x);
 bool intervalSurrounds(Interval interval, float x);
 float intervalClamp(Interval interval, float x);
 
+#define NUM_SPHERES 4
+
 struct Sphere {
   vec3 center;
   float radius;
@@ -80,6 +82,17 @@ struct Sphere {
 bool sphereHit(Sphere sphere, Ray ray, Interval interval,
                inout HitRecord hitRecord);
 void sphereGetUV(vec3 point, inout float u, inout float v);
+
+#define NUM_QUADS 4
+
+struct Quad {
+  vec3 q;
+  vec3 u;
+  vec3 v;
+  Material material;
+};
+
+bool quadHit(Quad quad, Ray ray, Interval interval, inout HitRecord hitRecord);
 
 float lengthSquared(vec3 vector);
 float degreesToRadians(float degrees);
@@ -100,10 +113,11 @@ bool worldHit(Ray ray, Interval interval, inout HitRecord hitRecord);
 vec3 rayColor(Ray ray);
 
 Sphere spheres[NUM_SPHERES];
+Quad quads[NUM_QUADS];
 
 void main() {
   /* TODO: add camera controller (+ defocus blur) + bvh */
-  const vec3 camPos = vec3(0.0);
+  const vec3 camPos = vec3(0.0, 0.0, 0.0);
 
   int index = 0;
   spheres[index].center = vec3(0, 0, -1);
@@ -135,6 +149,38 @@ void main() {
   spheres[index].material.type = MATERIAL_TYPE_METAL;
   spheres[index].material.albedo = vec3(0.8, 0.6, 0.2);
   spheres[index].material.fuzz = 0.0;
+
+  index = 0;
+  quads[index].q = vec3(-3, -2, 0);
+  quads[index].u = vec3(0, 0, -4);
+  quads[index].v = vec3(0, 4, 0);
+  quads[index].material.type = MATERIAL_TYPE_LAMBEERTIAN;
+  quads[index].material.albedo = vec3(1.0, 0.2, 0.2);
+  quads[index].material.textured = false;
+
+  index = 1;
+  quads[index].q = vec3(-2, -2, -5);
+  quads[index].u = vec3(4, 0, -0);
+  quads[index].v = vec3(0, 4, 0);
+  quads[index].material.type = MATERIAL_TYPE_LAMBEERTIAN;
+  quads[index].material.albedo = vec3(0.2, 1.0, 0.2);
+  quads[index].material.textured = false;
+
+  index = 2;
+  quads[index].q = vec3(3, -2, -4);
+  quads[index].u = vec3(0, 0, 4);
+  quads[index].v = vec3(0, 4, 0);
+  quads[index].material.type = MATERIAL_TYPE_LAMBEERTIAN;
+  quads[index].material.albedo = vec3(0.2, 0.2, 1.0);
+  quads[index].material.textured = false;
+
+  index = 3;
+  quads[index].q = vec3(-2, 3, -4);
+  quads[index].u = vec3(4, 0, 0);
+  quads[index].v = vec3(0, 0, 4);
+  quads[index].material.type = MATERIAL_TYPE_LAMBEERTIAN;
+  quads[index].material.albedo = vec3(1.0, 0.5, 0.0);
+  quads[index].material.textured = false;
 
   ivec2 imageSize = imageSize(resultImage);
   vec2 uv = vec2(gl_GlobalInvocationID.xy) / imageSize;
@@ -192,6 +238,16 @@ void hitRecordSetFaceNormal(inout HitRecord hitRecord, Ray ray,
                             vec3 outwardNormal) {
   hitRecord.frontFace = dot(ray.dir, outwardNormal) < 0;
   hitRecord.normal = hitRecord.frontFace ? outwardNormal : -outwardNormal;
+}
+
+bool isInterior(float a, float b, inout HitRecord hitRecord) {
+  if ((a < 0) || (1 < a) || (b < 0) || (1 < b)) {
+    return false;
+  }
+
+  hitRecord.u = a;
+  hitRecord.v = b;
+  return true;
 }
 
 float reflectance(float cosine, float refIdx) {
@@ -303,6 +359,41 @@ bool sphereHit(Sphere sphere, Ray ray, Interval interval,
   return true;
 }
 
+bool quadHit(Quad quad, Ray ray, Interval interval, inout HitRecord hitRecord) {
+  vec3 n = cross(quad.u, quad.v);
+
+  vec3 normal = normalize(n);
+  float d = dot(normal, quad.q);
+  vec3 w = n / dot(n, n);
+
+  float denom = dot(normal, ray.dir);
+
+  if (abs(denom) < 1e-8) {
+    return false;
+  }
+
+  float t = (d - dot(normal, ray.origin)) / denom;
+  if (!intervalContains(interval, t)) {
+    return false;
+  }
+
+  vec3 intersection = rayAt(ray, t);
+  vec3 planarHitptVector = intersection - quad.q;
+  float alpha = dot(w, cross(planarHitptVector, quad.v));
+  float beta = dot(w, cross(quad.u, planarHitptVector));
+
+  if (!isInterior(alpha, beta, hitRecord)) {
+    return false;
+  }
+
+  hitRecord.t = t;
+  hitRecord.point = intersection;
+  hitRecord.material = quad.material;
+  hitRecordSetFaceNormal(hitRecord, ray, normal);
+
+  return true;
+}
+
 void sphereGetUV(vec3 point, inout float u, inout float v) {
   float theta = acos(-point.y);
   float phi = atan(point.x, -point.z) + PI;
@@ -373,9 +464,15 @@ bool worldHit(Ray ray, Interval interval, inout HitRecord hitRecord) {
   bool hitAnything = false;
   float closestSoFar = interval.max;
 
-  for (int i = 0; i < NUM_SPHERES; ++i) {
+  for (int i = 0; i < NUM_SPHERES + NUM_QUADS; ++i) {
     Interval tempInterval = {interval.min, closestSoFar};
-    if (sphereHit(spheres[i], ray, tempInterval, tempRecord)) {
+    if (i < NUM_SPHERES &&
+        sphereHit(spheres[i], ray, tempInterval, tempRecord)) {
+      hitAnything = true;
+      closestSoFar = tempRecord.t;
+      hitRecord = tempRecord;
+    } else if (i < NUM_QUADS &&
+               quadHit(quads[i], ray, tempInterval, tempRecord)) {
       hitAnything = true;
       closestSoFar = tempRecord.t;
       hitRecord = tempRecord;
