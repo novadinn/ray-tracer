@@ -5,8 +5,8 @@ layout(set = 0, binding = 0, rgba8) uniform writeonly image2D resultImage;
 
 #define PI 3.1415926
 #define FLT_MAX 3.402823466e+38
-#define NUM_SAMPLES 100
-#define NUM_BOUNCES 50
+#define NUM_SAMPLES 50
+#define NUM_BOUNCES 10
 #define ANTI_ALIASING_FORCE 0.003
 #define BACKGROUND_COLOR vec3(0.7, 0.8, 1.0)
 
@@ -86,7 +86,7 @@ bool sphereHit(Sphere sphere, Ray ray, Interval interval,
                inout HitRecord hitRecord);
 void sphereGetUV(vec3 point, inout float u, inout float v);
 
-#define NUM_QUADS 6
+#define NUM_QUADS 18
 
 struct Quad {
   vec3 q;
@@ -172,6 +172,102 @@ void main() {
   quads[index].q = vec3(0, 0, 0);
   quads[index].u = vec3(555, 0, 0);
   quads[index].v = vec3(0, 555, 0);
+  quads[index].material = white;
+
+  vec3 boxA;
+  vec3 boxB;
+  vec3 bMin;
+  vec3 bMax;
+  vec3 dx;
+  vec3 dy;
+  vec3 dz;
+
+  boxA = vec3(100, 0, 65);
+  boxB = vec3(295, 165, 230);
+  bMin = vec3(min(boxA.x, boxB.x), min(boxA.y, boxB.y), min(boxA.z, boxB.z));
+  bMax = vec3(max(boxA.x, boxB.x), max(boxA.y, boxB.y), max(boxA.z, boxB.z));
+  dx = vec3(bMax.x - bMin.x, 0, 0);
+  dy = vec3(0, bMax.y - bMin.y, 0);
+  dz = vec3(0, 0, bMax.z - bMin.z);
+
+  index = 6;
+  quads[index].q = vec3(bMin.x, bMin.y, bMax.z);
+  quads[index].u = dx;
+  quads[index].v = dy;
+  quads[index].material = white;
+
+  index = 7;
+  quads[index].q = vec3(bMax.x, bMin.y, bMax.z);
+  quads[index].u = -dz;
+  quads[index].v = dy;
+  quads[index].material = white;
+
+  index = 8;
+  quads[index].q = vec3(bMax.x, bMin.y, bMin.z);
+  quads[index].u = -dx;
+  quads[index].v = dy;
+  quads[index].material = white;
+
+  index = 9;
+  quads[index].q = vec3(bMin.x, bMin.y, bMin.z);
+  quads[index].u = dz;
+  quads[index].v = dy;
+  quads[index].material = white;
+
+  index = 10;
+  quads[index].q = vec3(bMin.x, bMax.y, bMax.z);
+  quads[index].u = dx;
+  quads[index].v = -dz;
+  quads[index].material = white;
+
+  index = 11;
+  quads[index].q = vec3(bMin.x, bMin.y, bMin.z);
+  quads[index].u = dx;
+  quads[index].v = dz;
+  quads[index].material = white;
+
+  boxA = vec3(300, 0, 106);
+  boxB = vec3(430, 330, 200);
+  bMin = vec3(min(boxA.x, boxB.x), min(boxA.y, boxB.y), min(boxA.z, boxB.z));
+  bMax = vec3(max(boxA.x, boxB.x), max(boxA.y, boxB.y), max(boxA.z, boxB.z));
+  dx = vec3(bMax.x - bMin.x, 0, 0);
+  dy = vec3(0, bMax.y - bMin.y, 0);
+  dz = vec3(0, 0, bMax.z - bMin.z);
+
+  index = 12;
+  quads[index].q = vec3(bMin.x, bMin.y, bMax.z);
+  quads[index].u = dx;
+  quads[index].v = dy;
+  quads[index].material = white;
+
+  index = 13;
+  quads[index].q = vec3(bMax.x, bMin.y, bMax.z);
+  quads[index].u = -dz;
+  quads[index].v = dy;
+  quads[index].material = white;
+
+  index = 14;
+  quads[index].q = vec3(bMax.x, bMin.y, bMin.z);
+  quads[index].u = -dx;
+  quads[index].v = dy;
+  quads[index].material = white;
+
+  index = 15;
+  quads[index].q = vec3(bMin.x, bMin.y, bMin.z);
+  quads[index].u = dz;
+  quads[index].v = dy;
+  quads[index].material = white;
+
+  index = 16;
+  quads[index].q = vec3(bMin.x, bMax.y, bMax.z);
+  quads[index].u = dx;
+  quads[index].v = -dz;
+  quads[index].material = white;
+
+  index = 17;
+  quads[index].q = vec3(bMin.x, bMin.y, bMin.z);
+  quads[index].u = dx;
+  quads[index].v = dz;
   quads[index].material = white;
 
   ivec2 imageSize = imageSize(resultImage);
@@ -503,12 +599,13 @@ vec3 rayColor(Ray ray) {
       vec3 colorFromEmission =
           materialEmitted(record.material, record.u, record.v, record.point);
 
-      if (!materialScatter(record.material, ray, record, attenuation,
+      if (!materialScatter(record.material, currentRay, record, attenuation,
                            scattered)) {
         return colorFromEmission * result;
       }
 
       result *= attenuation;
+      result += colorFromEmission;
       currentRay = scattered;
     } else {
       return result * BACKGROUND_COLOR;
