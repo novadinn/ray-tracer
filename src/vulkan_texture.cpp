@@ -215,6 +215,11 @@ bool transitionTextureLayout(VulkanTexture *texture,
     barrier.srcAccessMask = 0;
     source_stage = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
     dest_stage = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+  } else if (old_layout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL &&
+             new_layout == VK_IMAGE_LAYOUT_GENERAL) {
+    barrier.srcAccessMask = 0;
+    source_stage = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+    dest_stage = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
   } else {
     ERROR("Unsupported layout transition!");
     return false;

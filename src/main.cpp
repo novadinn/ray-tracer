@@ -1,3 +1,5 @@
+#include "camera.h"
+#include "input.h"
 #include "logger.h"
 #include "platform.h"
 #include "vulkan_buffer.h"
@@ -12,6 +14,7 @@
 #include "vulkan_texture.h"
 
 #include "glm/glm.hpp"
+#include "glm/gtc/matrix_transform.hpp"
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_vulkan.h>
 #include <assert.h>
@@ -29,6 +32,14 @@
 #if PLATFORM_APPLE == 1
 #define VK_ENABLE_BETA_EXTENSIONS
 #endif
+
+struct UniformBufferObject {
+  glm::mat4 view;
+  glm::mat4 projection;
+  glm::vec4 viewportSize;
+  glm::vec4 cameraPosition;
+  glm::vec4 frame;
+};
 
 VKAPI_ATTR VkBool32 VKAPI_CALL vulkanDebugCallback(
     VkDebugUtilsMessageSeverityFlagBitsEXT message_severity,
@@ -307,6 +318,21 @@ int main(int argc, char **argv) {
   VkDescriptorSetLayout compute_descriptor_set_layout =
       createDescriptorLayoutFromCache(&device, &compute_layout_create_info);
 
+  VkDescriptorSetLayoutBinding compute_ubo_descriptor_set_layout_binding =
+      descriptorSetLayoutBinding(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+                                 VK_SHADER_STAGE_COMPUTE_BIT);
+  VkDescriptorSetLayoutCreateInfo compute_ubo_layout_create_info = {};
+  compute_ubo_layout_create_info.sType =
+      VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+  compute_ubo_layout_create_info.pNext = 0;
+  compute_ubo_layout_create_info.flags = 0;
+  compute_ubo_layout_create_info.bindingCount = 1;
+  compute_ubo_layout_create_info.pBindings =
+      &compute_ubo_descriptor_set_layout_binding;
+
+  VkDescriptorSetLayout compute_descriptor_set_layout_ubo =
+      createDescriptorLayoutFromCache(&device, &compute_ubo_layout_create_info);
+
   VkPipelineShaderStageCreateInfo compute_stage_create_info =
       pipelineShaderStageCreateInfo(VK_SHADER_STAGE_COMPUTE_BIT,
                                     compute_shader_module);
@@ -314,7 +340,8 @@ int main(int argc, char **argv) {
   VulkanPipeline compute_pipeline;
   if (!createComputePipeline(
           &device,
-          std::vector<VkDescriptorSetLayout>{compute_descriptor_set_layout},
+          std::vector<VkDescriptorSetLayout>{compute_descriptor_set_layout,
+                                             compute_descriptor_set_layout_ubo},
           compute_stage_create_info, &compute_pipeline)) {
     FATAL("Failed to create a compute pipeline!");
     exit(1);
@@ -323,25 +350,59 @@ int main(int argc, char **argv) {
   vkDestroyShaderModule(device.logical_device, compute_shader_module, 0);
 
   VulkanTexture texture;
-  if (!createTexture(&device, vma_allocator, VK_FORMAT_R8G8B8A8_UNORM,
-                     window_width, window_height,
-                     VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT,
-                     &texture)) {
+  if (!createTexture(
+          &device, vma_allocator, VK_FORMAT_R8G8B8A8_UNORM, window_width,
+          window_height,
+          // VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT,
+          VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+              VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT,
+          &texture)) {
     FATAL("Failed to create a texture!")
     exit(1);
   }
+  void *pixels = malloc(window_width * window_height * 4);
+  memset(pixels, 0, window_width * window_height * 4);
+  writeTextureData(&texture, &device, pixels, vma_allocator, graphics_queue,
+                   graphics_command_pool, graphics_family_index);
+  free(pixels);
   VkCommandBuffer temp_command_buffer;
   if (!allocateAndBeginSingleUseCommandBuffer(&device, graphics_command_pool,
                                               &temp_command_buffer)) {
     ERROR("Failed to allocate a temp command buffer!");
     exit(1);
   }
-  if (!transitionTextureLayout(
-          &texture, temp_command_buffer, VK_IMAGE_LAYOUT_UNDEFINED,
-          VK_IMAGE_LAYOUT_GENERAL, graphics_family_index)) {
+  if (!transitionTextureLayout(&texture, temp_command_buffer,
+                               VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                               VK_IMAGE_LAYOUT_GENERAL,
+                               graphics_family_index)) {
     ERROR("Failed to transition image layout!");
     exit(1);
   }
+
+  VkImageMemoryBarrier image_memory_barrier = {};
+  image_memory_barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+  image_memory_barrier.pNext = 0;
+  image_memory_barrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+  image_memory_barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+  image_memory_barrier.image = texture.handle;
+  image_memory_barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+  image_memory_barrier.subresourceRange.baseMipLevel = 0;
+  image_memory_barrier.subresourceRange.levelCount = 1;
+  image_memory_barrier.subresourceRange.baseArrayLayer = 0;
+  image_memory_barrier.subresourceRange.layerCount = 1;
+
+  if (graphics_family_index != compute_family_index) {
+    image_memory_barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+    image_memory_barrier.dstAccessMask = 0;
+    image_memory_barrier.srcQueueFamilyIndex = graphics_family_index;
+    image_memory_barrier.dstQueueFamilyIndex = compute_family_index;
+
+    vkCmdPipelineBarrier(temp_command_buffer,
+                         VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                         VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, 0, 0, 0, 1,
+                         &image_memory_barrier);
+  }
+
   endAndFreeSingleUseCommandBuffer(temp_command_buffer, &device,
                                    graphics_command_pool, graphics_queue);
 
@@ -382,12 +443,68 @@ int main(int argc, char **argv) {
     exit(1);
   }
 
+  VulkanBuffer ubo_buffer;
+  if (!createBuffer(vma_allocator, sizeof(UniformBufferObject),
+                    VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+                    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                        VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                    VMA_MEMORY_USAGE_CPU_TO_GPU, &ubo_buffer)) {
+    FATAL("Failed to create a uniform buffer!");
+    exit(1);
+  }
+
+  descriptor_builder = {};
+
+  VkDescriptorSet compute_ubo_descriptor_set;
+  if (!beginDescriptorBuilder(&descriptor_builder)) {
+    FATAL("Failed to create a descriptor set!");
+    exit(1);
+  }
+  VkDescriptorBufferInfo descriptor_buffer_info = {};
+  descriptor_buffer_info.buffer = ubo_buffer.handle;
+  descriptor_buffer_info.offset = 0;
+  descriptor_buffer_info.range = ubo_buffer.size;
+  bindDescriptorBuilderBuffer(0, &descriptor_buffer_info,
+                              VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+                              VK_SHADER_STAGE_COMPUTE_BIT, &descriptor_builder);
+  if (!endDescriptorBuilder(&descriptor_builder, &device,
+                            &compute_ubo_descriptor_set)) {
+    FATAL("Failed to create a descriptor set!");
+    exit(1);
+  }
+
+  Camera camera;
+  createCamera(90, window_width / window_height, 0.01f, 10000.0f, &camera);
+
+  UniformBufferObject ubo = {};
   bool running = true;
+  glm::ivec2 previous_mouse = {0, 0};
+  uint32_t last_update_time = SDL_GetTicks();
+
   while (running) {
+    uint32_t start_time_ms = SDL_GetTicks();
     SDL_Event event;
+    Input::Begin();
 
     while (SDL_PollEvent(&event)) {
       switch (event.type) {
+      case SDL_KEYDOWN: {
+        if (!event.key.repeat) {
+          Input::KeyDownEvent(event);
+        }
+      } break;
+      case SDL_KEYUP: {
+        Input::KeyUpEvent(event);
+      } break;
+      case SDL_MOUSEBUTTONDOWN: {
+        Input::MouseButtonDownEvent(event);
+      } break;
+      case SDL_MOUSEBUTTONUP: {
+        Input::MouseButtonUpEvent(event);
+      } break;
+      case SDL_MOUSEWHEEL: {
+        Input::WheelEvent(event);
+      } break;
       case SDL_WINDOWEVENT: {
         if (event.window.event == SDL_WINDOWEVENT_CLOSE) {
           running = false;
@@ -402,6 +519,30 @@ int main(int argc, char **argv) {
       }
     }
 
+    float delta_time = 0.01f;
+    glm::ivec2 current_mouse;
+    Input::GetMousePosition(&current_mouse.x, &current_mouse.y);
+    glm::vec2 mouse_delta = current_mouse - previous_mouse;
+    mouse_delta *= delta_time;
+
+    glm::ivec2 wheel_movement;
+    Input::GetWheelMovement(&wheel_movement.x, &wheel_movement.y);
+
+    if (Input::WasMouseButtonHeld(SDL_BUTTON_MIDDLE)) {
+      cameraRotate(&camera, mouse_delta);
+    }
+
+    ubo.view = cameraGetViewMatrix(&camera);
+    ubo.projection = cameraGetProjectionMatrix(&camera);
+    ubo.viewportSize =
+        glm::vec4(camera.viewport_width, camera.viewport_height, 0.0, 0.0);
+    ubo.cameraPosition = glm::vec4(glm::vec3(0.0), 0.0);
+
+    if (!loadBufferData(&ubo_buffer, vma_allocator, &ubo)) {
+      FATAL("Failed to load a buffer data!");
+      exit(1);
+    }
+
     vkDeviceWaitIdle(device.logical_device);
 
     vkWaitForFences(device.logical_device, 1,
@@ -414,13 +555,53 @@ int main(int argc, char **argv) {
         compute_command_buffers[current_frame];
     beginCommandBuffer(compute_command_buffer, 0);
 
+    VkImageMemoryBarrier image_memory_barrier = {};
+    image_memory_barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    image_memory_barrier.pNext = 0;
+    image_memory_barrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+    image_memory_barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+    image_memory_barrier.image = texture.handle;
+    image_memory_barrier.subresourceRange.aspectMask =
+        VK_IMAGE_ASPECT_COLOR_BIT;
+    image_memory_barrier.subresourceRange.baseMipLevel = 0;
+    image_memory_barrier.subresourceRange.levelCount = 1;
+    image_memory_barrier.subresourceRange.baseArrayLayer = 0;
+    image_memory_barrier.subresourceRange.layerCount = 1;
+
+    if (graphics_family_index != compute_family_index) {
+      image_memory_barrier.srcAccessMask = 0;
+      image_memory_barrier.dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+      image_memory_barrier.srcQueueFamilyIndex = graphics_family_index;
+      image_memory_barrier.dstQueueFamilyIndex = compute_family_index;
+
+      vkCmdPipelineBarrier(compute_command_buffer,
+                           VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                           VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, 0, 0, 0,
+                           1, &image_memory_barrier);
+    }
+
     vkCmdBindPipeline(compute_command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE,
                       compute_pipeline.handle);
     vkCmdBindDescriptorSets(
         compute_command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE,
         compute_pipeline.layout, 0, 1, &compute_texture_descriptor_set, 0, 0);
+    vkCmdBindDescriptorSets(
+        compute_command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE,
+        compute_pipeline.layout, 1, 1, &compute_ubo_descriptor_set, 0, 0);
     vkCmdDispatch(compute_command_buffer, texture.width / 16,
                   texture.height / 16, 1);
+
+    if (graphics_family_index != compute_family_index) {
+      image_memory_barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+      image_memory_barrier.dstAccessMask = 0;
+      image_memory_barrier.srcQueueFamilyIndex = compute_family_index;
+      image_memory_barrier.dstQueueFamilyIndex = graphics_family_index;
+
+      vkCmdPipelineBarrier(compute_command_buffer,
+                           VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                           VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, 0, 0, 0,
+                           1, &image_memory_barrier);
+    }
 
     vkEndCommandBuffer(compute_command_buffer);
 
@@ -430,9 +611,11 @@ int main(int argc, char **argv) {
     VkSubmitInfo compute_submit_info = {};
     compute_submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     compute_submit_info.pNext = 0;
-    compute_submit_info.waitSemaphoreCount = 0;
-    compute_submit_info.pWaitSemaphores = 0;
-    compute_submit_info.pWaitDstStageMask = &wait_dst_stage_mask;
+    // compute_submit_info.waitSemaphoreCount = ubo.frame == 0 ? 0 : 1;
+    // compute_submit_info.pWaitSemaphores =
+    //     ubo.frame == 0 ? 0 : &render_finished_semaphores[current_frame];
+    // compute_submit_info.pWaitDstStageMask =
+    //     ubo.frame == 0 ? 0 : &wait_dst_stage_mask;
     compute_submit_info.commandBufferCount = 1;
     compute_submit_info.pCommandBuffers =
         &compute_command_buffers[current_frame];
@@ -446,6 +629,9 @@ int main(int argc, char **argv) {
       ERROR("Vulkan queue submit failed.");
     }
 
+    vkWaitForFences(device.logical_device, 1,
+                    &compute_in_flight_fences[current_frame], VK_TRUE,
+                    UINT64_MAX);
     vkWaitForFences(device.logical_device, 1, &in_flight_fences[current_frame],
                     true, UINT64_MAX);
     VK_CHECK(vkResetFences(device.logical_device, 1,
@@ -460,27 +646,27 @@ int main(int argc, char **argv) {
         graphics_command_buffers[current_frame];
     beginCommandBuffer(graphics_command_buffer, 0);
 
-    VkImageMemoryBarrier image_memory_barrier = {};
-    image_memory_barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    image_memory_barrier.pNext = 0;
-    image_memory_barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-    image_memory_barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-    image_memory_barrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
-    image_memory_barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
-    image_memory_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    image_memory_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    image_memory_barrier.image = texture.handle;
-    image_memory_barrier.subresourceRange.aspectMask =
-        VK_IMAGE_ASPECT_COLOR_BIT;
-    image_memory_barrier.subresourceRange.baseMipLevel = 0;
-    image_memory_barrier.subresourceRange.levelCount = 1;
-    image_memory_barrier.subresourceRange.baseArrayLayer = 0;
-    image_memory_barrier.subresourceRange.layerCount = 1;
+    if (graphics_family_index != compute_family_index) {
+      image_memory_barrier.srcAccessMask = 0;
+      image_memory_barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+      image_memory_barrier.srcQueueFamilyIndex = compute_family_index;
+      image_memory_barrier.dstQueueFamilyIndex = graphics_family_index;
 
-    vkCmdPipelineBarrier(graphics_command_buffer,
-                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                         VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr,
-                         0, nullptr, 1, &image_memory_barrier);
+      vkCmdPipelineBarrier(graphics_command_buffer,
+                           VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                           VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, 0, 0, 0,
+                           1, &image_memory_barrier);
+    } else {
+      image_memory_barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+      image_memory_barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+      image_memory_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+      image_memory_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+
+      vkCmdPipelineBarrier(graphics_command_buffer,
+                           VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                           VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, 0, 0, 0,
+                           1, &image_memory_barrier);
+    }
 
     glm::vec4 clear_color = {0, 0, 0, 1};
     VkClearValue clear_value = {};
@@ -532,6 +718,18 @@ int main(int argc, char **argv) {
 
     vkCmdEndRenderPass(graphics_command_buffer);
 
+    if (graphics_family_index != compute_family_index) {
+      image_memory_barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+      image_memory_barrier.dstAccessMask = 0;
+      image_memory_barrier.srcQueueFamilyIndex = graphics_family_index;
+      image_memory_barrier.dstQueueFamilyIndex = compute_family_index;
+
+      vkCmdPipelineBarrier(graphics_command_buffer,
+                           VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                           VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, 0, 0, 0,
+                           1, &image_memory_barrier);
+    }
+
     VK_CHECK(vkEndCommandBuffer(graphics_command_buffer));
 
     VkPipelineStageFlags wait_dst_stage_masks[2] = {
@@ -576,6 +774,16 @@ int main(int argc, char **argv) {
     }
 
     current_frame = (current_frame + 1) % swapchain.max_frames_in_flight;
+
+    const uint32_t ms_per_frame = 1000 / 120;
+    const uint32_t elapsed_time_ms = SDL_GetTicks() - start_time_ms;
+    if (elapsed_time_ms < ms_per_frame) {
+      SDL_Delay(ms_per_frame - elapsed_time_ms);
+    }
+
+    Input::GetMousePosition(&previous_mouse.x, &previous_mouse.y);
+
+    ubo.frame.x++;
   }
 
   vkDeviceWaitIdle(device.logical_device);
@@ -583,6 +791,8 @@ int main(int argc, char **argv) {
   shutdownDescriptorLayoutCache(&device);
 
   destroyPipeline(&compute_pipeline, &device);
+
+  destroyBuffer(&ubo_buffer, vma_allocator);
 
   destroyTexture(&texture, &device, vma_allocator);
 

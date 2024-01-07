@@ -41,6 +41,8 @@ include_directories(
 add_executable(${PROJECT_NAME} 
   src/main.cpp 
   src/logger.cpp 
+  src/camera.cpp
+  src/input.cpp
   src/vulkan_swapchain.cpp 
   src/vulkan_device.cpp 
   src/vulkan_texture.cpp 

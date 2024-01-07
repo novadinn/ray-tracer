@@ -1,616 +1,270 @@
 #version 450
 
-layout(local_size_x = 16, local_size_y = 16) in;
-layout(set = 0, binding = 0, rgba8) uniform writeonly image2D resultImage;
-
 #define PI 3.1415926
 #define FLT_MAX 3.402823466e+38
-#define NUM_SAMPLES 50
-#define NUM_BOUNCES 10
-#define ANTI_ALIASING_FORCE 0.003
-#define BACKGROUND_COLOR vec3(0.7, 0.8, 1.0)
 
-uint rngState = (600 * gl_GlobalInvocationID.x + gl_GlobalInvocationID.y);
+/* TODO: temp */
+#define MAX_BOUNCE_COUNT 25
+#define NUM_RAYS_PER_PIXEL 100
+#define DEFOCUS_STRENGTH 5
+#define DIVERGE_STRENGTH 5
 
-#define TEXTURE_TYPE_SOLID 0
-#define TEXTURE_TYPE_CHECKER 1
+layout(local_size_x = 16, local_size_y = 16) in;
+layout(set = 0, binding = 0, rgba8) uniform image2D resultImage;
 
-struct Texture {
-  int type;
-  vec3 color;
-  float invScale;
-  vec3 evenColor;
-  vec3 oddColor;
-};
-
-vec3 textureValue(Texture texture, float u, float v, vec3 point);
+layout(set = 1, binding = 0) uniform UniformBufferObject {
+  mat4 view;
+  mat4 projection;
+  vec4 viewportSize;
+  vec4 cameraPosition;
+  vec4 frame;
+}
+ubo;
 
 struct Ray {
   vec3 origin;
   vec3 dir;
 };
 
-vec3 rayAt(Ray ray, float t);
-
-#define MATERIAL_TYPE_LAMBEERTIAN 0
-#define MATERIAL_TYPE_METAL 1
-#define MATERIAL_TYPE_DIELECTRIC 2
-#define MATERIAL_TYPE_DIFFUSE_LIGHT 3
-
-struct Material {
-  int type;
-  vec3 albedo;
-  float fuzz;
-  float ir;
-  bool textured;
-  Texture texture;
+struct RayTracingMaterial {
+  vec3 colour;
+  vec3 emissionColour;
+  float emissionStrength;
+  float smoothness;
+  float specularProbability;
+  vec3 specularColour;
 };
 
-struct HitRecord {
-  vec3 point;
+struct HitInfo {
+  bool didHit;
+  float dst;
+  vec3 hitPoint;
   vec3 normal;
-  float t;
-  bool frontFace;
-  Material material;
-  float u;
-  float v;
+  RayTracingMaterial material;
 };
-
-void hitRecordSetFaceNormal(inout HitRecord hitRecord, Ray ray,
-                            vec3 outwardNormal);
-bool isInterior(float a, float b, inout HitRecord hitRecord);
-
-float reflectance(float cosine, float refIdx);
-bool materialScatter(Material material, Ray ray, HitRecord record,
-                     inout vec3 attenuation, inout Ray scattered);
-vec3 materialEmitted(Material material, float u, float v, vec3 point);
-
-struct Interval {
-  float min;
-  float max;
-};
-
-bool intervalContains(Interval interval, float x);
-bool intervalSurrounds(Interval interval, float x);
-float intervalClamp(Interval interval, float x);
-
-#define NUM_SPHERES 1
 
 struct Sphere {
-  vec3 center;
+  vec3 position;
   float radius;
-  Material material;
+  RayTracingMaterial material;
 };
 
-bool sphereHit(Sphere sphere, Ray ray, Interval interval,
-               inout HitRecord hitRecord);
-void sphereGetUV(vec3 point, inout float u, inout float v);
+uint nextRandom(inout uint state);
+float randomValue(inout uint state);
+float randomValueNormalDistribution(inout uint state);
+vec3 randomDirection(inout uint state);
+vec2 randomPointInCircle(inout uint rngState);
+vec3 randomHemisphereDirection(vec3 normal, inout uint rngState);
 
-#define NUM_QUADS 18
+HitInfo raySphere(Ray ray, vec3 sphereCentre, float sphereRadius);
+HitInfo calculateRayCollision(Ray ray);
+vec3 trace(Ray ray, inout uint rngState);
+vec3 screenToWorldDirection(vec2 point);
 
-struct Quad {
-  vec3 q;
-  vec3 u;
-  vec3 v;
-  Material material;
-};
-
-bool quadHit(Quad quad, Ray ray, Interval interval, inout HitRecord hitRecord);
-
-float lengthSquared(vec3 vector);
-float degreesToRadians(float degrees);
-float linearToGamma(float linearComponent);
-bool nearZero(vec3 vec);
-
-uint stepRNG(uint rngState);
-float stepAndOutputRNGFloat(inout uint rngState);
-float randomFloat();
-float randomFloat(float min, float max);
-vec3 randomVector();
-vec3 randomVector(float min, float max);
-vec3 randomInUnitSphere();
-vec3 randomUnitVector();
-vec3 randomOnHemisphere(vec3 normal);
-
-bool worldHit(Ray ray, Interval interval, inout HitRecord hitRecord);
-vec3 rayColor(Ray ray);
-
-/* +1 so that if NUM_SPHERES == 0 there will be no compilation errors */
-Sphere spheres[NUM_SPHERES + 1];
-Quad quads[NUM_QUADS];
+#define NUM_SPHERES 4
+Sphere spheres[NUM_SPHERES];
 
 void main() {
-  /* TODO: add camera controller (+ defocus blur) + bvh */
-  const vec3 camPos = vec3(278.0, 278.0, 555.0);
-
-  Material red;
-  red.type = MATERIAL_TYPE_LAMBEERTIAN;
-  red.albedo = vec3(0.65, 0.05, 0.05);
-  Material white;
-  white.type = MATERIAL_TYPE_LAMBEERTIAN;
-  white.albedo = vec3(0.73);
-  Material green;
-  green.type = MATERIAL_TYPE_LAMBEERTIAN;
-  green.albedo = vec3(0.12, 0.45, 0.15);
-  Material light;
-  light.type = MATERIAL_TYPE_DIFFUSE_LIGHT;
-  light.textured = true;
-  light.texture.type = TEXTURE_TYPE_SOLID;
-  light.texture.color = vec3(15);
-
   int index = 0;
-  quads[index].q = vec3(555, 0, 0);
-  quads[index].u = vec3(0, 555, 0);
-  quads[index].v = vec3(0, 0, 555);
-  quads[index].material = green;
+  spheres[index].position = vec3(0, 0, -5);
+  spheres[index].radius = 1.0;
+  spheres[index].material.colour = vec3(0.5, 0.5, 0.5);
+  spheres[index].material.emissionColour = vec3(0);
+  spheres[index].material.emissionStrength = 0;
+  spheres[index].material.smoothness = 1.0;
+  spheres[index].material.specularProbability = 0.5;
+  spheres[index].material.specularColour = vec3(1.0);
 
   index = 1;
-  quads[index].q = vec3(0, 0, 0);
-  quads[index].u = vec3(0, 555, 0);
-  quads[index].v = vec3(0, 0, 555);
-  quads[index].material = red;
+  spheres[index].position = vec3(3, 0, -5);
+  spheres[index].radius = 1.0;
+  spheres[index].material.colour = vec3(0.8, 0.2, 0.2);
+  spheres[index].material.emissionColour = vec3(0);
+  spheres[index].material.emissionStrength = 0;
+  spheres[index].material.smoothness = 0.5;
+  spheres[index].material.specularProbability = 0.0;
+  spheres[index].material.specularColour = vec3(1.0);
 
   index = 2;
-  quads[index].q = vec3(343, 554, 332);
-  quads[index].u = vec3(-130, 0, 0);
-  quads[index].v = vec3(0, 0, -105);
-  quads[index].material = light;
+  spheres[index].position = vec3(0, -101, -5);
+  spheres[index].radius = 100.0;
+  spheres[index].material.colour = vec3(0.2, 0.8, 0.05);
+  spheres[index].material.emissionColour = vec3(0);
+  spheres[index].material.emissionStrength = 0;
+  spheres[index].material.smoothness = 0.0;
+  spheres[index].material.specularProbability = 0.0;
+  spheres[index].material.specularColour = vec3(1.0);
 
   index = 3;
-  quads[index].q = vec3(0, 0, 0);
-  quads[index].u = vec3(555, 0, 0);
-  quads[index].v = vec3(0, 0, 555);
-  quads[index].material = white;
-
-  index = 4;
-  quads[index].q = vec3(555, 555, 555);
-  quads[index].u = vec3(-555, 0, 0);
-  quads[index].v = vec3(0, 0, -555);
-  quads[index].material = white;
-
-  index = 5;
-  quads[index].q = vec3(0, 0, 0);
-  quads[index].u = vec3(555, 0, 0);
-  quads[index].v = vec3(0, 555, 0);
-  quads[index].material = white;
-
-  vec3 boxA;
-  vec3 boxB;
-  vec3 bMin;
-  vec3 bMax;
-  vec3 dx;
-  vec3 dy;
-  vec3 dz;
-
-  boxA = vec3(100, 0, 65);
-  boxB = vec3(295, 165, 230);
-  bMin = vec3(min(boxA.x, boxB.x), min(boxA.y, boxB.y), min(boxA.z, boxB.z));
-  bMax = vec3(max(boxA.x, boxB.x), max(boxA.y, boxB.y), max(boxA.z, boxB.z));
-  dx = vec3(bMax.x - bMin.x, 0, 0);
-  dy = vec3(0, bMax.y - bMin.y, 0);
-  dz = vec3(0, 0, bMax.z - bMin.z);
-
-  index = 6;
-  quads[index].q = vec3(bMin.x, bMin.y, bMax.z);
-  quads[index].u = dx;
-  quads[index].v = dy;
-  quads[index].material = white;
-
-  index = 7;
-  quads[index].q = vec3(bMax.x, bMin.y, bMax.z);
-  quads[index].u = -dz;
-  quads[index].v = dy;
-  quads[index].material = white;
-
-  index = 8;
-  quads[index].q = vec3(bMax.x, bMin.y, bMin.z);
-  quads[index].u = -dx;
-  quads[index].v = dy;
-  quads[index].material = white;
-
-  index = 9;
-  quads[index].q = vec3(bMin.x, bMin.y, bMin.z);
-  quads[index].u = dz;
-  quads[index].v = dy;
-  quads[index].material = white;
-
-  index = 10;
-  quads[index].q = vec3(bMin.x, bMax.y, bMax.z);
-  quads[index].u = dx;
-  quads[index].v = -dz;
-  quads[index].material = white;
-
-  index = 11;
-  quads[index].q = vec3(bMin.x, bMin.y, bMin.z);
-  quads[index].u = dx;
-  quads[index].v = dz;
-  quads[index].material = white;
-
-  boxA = vec3(300, 0, 106);
-  boxB = vec3(430, 330, 200);
-  bMin = vec3(min(boxA.x, boxB.x), min(boxA.y, boxB.y), min(boxA.z, boxB.z));
-  bMax = vec3(max(boxA.x, boxB.x), max(boxA.y, boxB.y), max(boxA.z, boxB.z));
-  dx = vec3(bMax.x - bMin.x, 0, 0);
-  dy = vec3(0, bMax.y - bMin.y, 0);
-  dz = vec3(0, 0, bMax.z - bMin.z);
-
-  index = 12;
-  quads[index].q = vec3(bMin.x, bMin.y, bMax.z);
-  quads[index].u = dx;
-  quads[index].v = dy;
-  quads[index].material = white;
-
-  index = 13;
-  quads[index].q = vec3(bMax.x, bMin.y, bMax.z);
-  quads[index].u = -dz;
-  quads[index].v = dy;
-  quads[index].material = white;
-
-  index = 14;
-  quads[index].q = vec3(bMax.x, bMin.y, bMin.z);
-  quads[index].u = -dx;
-  quads[index].v = dy;
-  quads[index].material = white;
-
-  index = 15;
-  quads[index].q = vec3(bMin.x, bMin.y, bMin.z);
-  quads[index].u = dz;
-  quads[index].v = dy;
-  quads[index].material = white;
-
-  index = 16;
-  quads[index].q = vec3(bMin.x, bMax.y, bMax.z);
-  quads[index].u = dx;
-  quads[index].v = -dz;
-  quads[index].material = white;
-
-  index = 17;
-  quads[index].q = vec3(bMin.x, bMin.y, bMin.z);
-  quads[index].u = dx;
-  quads[index].v = dz;
-  quads[index].material = white;
+  spheres[index].position = vec3(-70, 0, 15);
+  spheres[index].radius = 40.0;
+  spheres[index].material.colour = vec3(0, 1, 0);
+  spheres[index].material.emissionColour = vec3(5, 5, 5);
+  spheres[index].material.emissionStrength = 1;
+  spheres[index].material.smoothness = 0.0;
+  spheres[index].material.specularProbability = 0.0;
+  spheres[index].material.specularColour = vec3(1.0);
 
   ivec2 imageSize = imageSize(resultImage);
   vec2 uv = vec2(gl_GlobalInvocationID.xy) / imageSize;
 
   float aspectRatio = float(imageSize.x) / float(imageSize.y);
 
-  vec3 pixelColor = vec3(0.0);
-  for (int i = 0; i < NUM_SAMPLES; ++i) {
-    float px = randomFloat(-ANTI_ALIASING_FORCE, ANTI_ALIASING_FORCE);
-    float py = randomFloat(-ANTI_ALIASING_FORCE, ANTI_ALIASING_FORCE);
-    vec2 sampleSquare = (px * vec2(uv.x, 0.0)) + (py * vec2(0.0, uv.y));
+  uint pixelIndex =
+      gl_GlobalInvocationID.x * imageSize.x + gl_GlobalInvocationID.y;
+  uint rngState = pixelIndex + int(ubo.frame.x) * 719393;
 
-    Ray ray = {camPos, normalize(vec3((-1.0 + 2.0 * (uv + sampleSquare)) *
-                                          vec2(aspectRatio, 1.0),
-                                      -1.0))};
+  vec3 totalIncomingLight = vec3(0.0);
+  for (int rayIndex = 0; rayIndex < NUM_RAYS_PER_PIXEL; rayIndex++) {
+    Ray ray;
+    vec2 defocusJitter =
+        randomPointInCircle(rngState) * DEFOCUS_STRENGTH / imageSize.x;
+    ray.origin = ubo.cameraPosition.xyz + vec3(defocusJitter / imageSize, 0.0);
+    vec2 jitter =
+        randomPointInCircle(rngState) * DIVERGE_STRENGTH / imageSize.x;
+    // ray.dir = normalize(
+    //     vec3((-1.0 + 2.0 * uv + (jitter / imageSize)) *
+    //     vec2(aspectRatio, 1.0),
+    //          -1.0));
+    ray.dir =
+        screenToWorldDirection(gl_GlobalInvocationID.xy) + vec3(jitter, 0.0);
 
-    pixelColor += rayColor(ray);
+    totalIncomingLight += trace(ray, rngState);
   }
 
-  pixelColor *= 1.0 / NUM_SAMPLES;
-  pixelColor.x = linearToGamma(pixelColor.x);
-  pixelColor.y = linearToGamma(pixelColor.y);
-  pixelColor.z = linearToGamma(pixelColor.z);
+  vec3 pixelColor = totalIncomingLight / NUM_RAYS_PER_PIXEL;
 
-  imageStore(resultImage, ivec2(gl_GlobalInvocationID.xy),
-             vec4(pixelColor, 1.0));
+  vec4 oldRender =
+      vec4(imageLoad(resultImage, ivec2(gl_GlobalInvocationID.xy)).xyz, 1.0);
+  vec4 newRender = vec4(pixelColor, 1.0);
+  float weight = 1.0 / (ubo.frame.x + 1);
+  vec4 accumulatedAverage = oldRender * (1 - weight) + newRender * weight;
+
+  imageStore(resultImage, ivec2(gl_GlobalInvocationID.xy), accumulatedAverage);
 }
 
-vec3 textureValue(Texture texture, float u, float v, vec3 point) {
-  switch (texture.type) {
-  case TEXTURE_TYPE_SOLID: {
-    return texture.color;
-  } break;
-  case TEXTURE_TYPE_CHECKER: {
-    int xInt = int(floor(texture.invScale * point.x));
-    int yInt = int(floor(texture.invScale * point.y));
-    int zInt = int(floor(texture.invScale * point.z));
-
-    bool isEven = (xInt + yInt + zInt) % 2 == 0;
-
-    return isEven ? texture.evenColor : texture.oddColor;
-
-  } break;
-  default: {
-    return vec3(0.0);
-  } break;
-  }
-
-  return vec3(0.0);
+uint nextRandom(inout uint state) {
+  state = state * 747796405 + 2891336453;
+  uint result = ((state >> ((state >> 28) + 4)) ^ state) * 277803737;
+  result = (result >> 22) ^ result;
+  return result;
 }
 
-vec3 rayAt(Ray ray, float t) { return ray.origin + t * ray.dir; }
+float randomValue(inout uint state) { return nextRandom(state) / 4294967295.0; }
 
-void hitRecordSetFaceNormal(inout HitRecord hitRecord, Ray ray,
-                            vec3 outwardNormal) {
-  hitRecord.frontFace = dot(ray.dir, outwardNormal) < 0;
-  hitRecord.normal = hitRecord.frontFace ? outwardNormal : -outwardNormal;
+float randomValueNormalDistribution(inout uint state) {
+  float theta = 2 * 3.1415926 * randomValue(state);
+  float rho = sqrt(-2 * log(randomValue(state)));
+  return rho * cos(theta);
 }
 
-bool isInterior(float a, float b, inout HitRecord hitRecord) {
-  if ((a < 0) || (1 < a) || (b < 0) || (1 < b)) {
-    return false;
-  }
-
-  hitRecord.u = a;
-  hitRecord.v = b;
-  return true;
+vec3 randomDirection(inout uint state) {
+  float x = randomValueNormalDistribution(state);
+  float y = randomValueNormalDistribution(state);
+  float z = randomValueNormalDistribution(state);
+  return normalize(vec3(x, y, z));
 }
 
-float reflectance(float cosine, float refIdx) {
-  float r0 = (1 - refIdx) / (1 + refIdx);
-  r0 = r0 * r0;
-
-  return r0 + (1 - r0) * pow(1 - cosine, 5);
+vec2 randomPointInCircle(inout uint rngState) {
+  float angle = randomValue(rngState) * 2 * PI;
+  vec2 pointOnCircle = vec2(cos(angle), sin(angle));
+  return pointOnCircle * sqrt(randomValue(rngState));
 }
 
-bool materialScatter(Material material, Ray ray, HitRecord record,
-                     inout vec3 attenuation, inout Ray scattered) {
-  switch (material.type) {
-  case MATERIAL_TYPE_LAMBEERTIAN: {
-    vec3 scatterDirection = record.normal + randomUnitVector();
-    if (nearZero(scatterDirection)) {
-      scatterDirection = record.normal;
-    }
-    scattered.origin = record.point;
-    scattered.dir = scatterDirection;
-    if (material.textured) {
-      attenuation =
-          textureValue(material.texture, record.u, record.v, record.point);
-    } else {
-      attenuation = material.albedo;
-    }
-
-    return true;
-  } break;
-  case MATERIAL_TYPE_METAL: {
-    vec3 reflected = reflect(normalize(ray.dir), record.normal);
-    scattered.origin = record.point;
-    scattered.dir = reflected + material.fuzz * randomUnitVector();
-    attenuation = material.albedo;
-
-    return dot(scattered.dir, record.normal) > 0;
-  } break;
-  case MATERIAL_TYPE_DIELECTRIC: {
-    attenuation = vec3(1.0);
-    float refractionRatio =
-        record.frontFace ? (1.0 / material.ir) : material.ir;
-
-    vec3 unitDirection = normalize(ray.dir);
-    float cosTheta = min(dot(-unitDirection, record.normal), 1.0);
-    float sinTheta = sqrt(1.0 - (cosTheta * cosTheta));
-
-    bool cannotRefract = (refractionRatio * sinTheta) > 1.0;
-    vec3 direction;
-    if (cannotRefract ||
-        reflectance(cosTheta, refractionRatio) > randomFloat()) {
-      direction = reflect(unitDirection, record.normal);
-    } else {
-      direction = refract(unitDirection, record.normal, refractionRatio);
-    }
-
-    scattered.origin = record.point;
-    scattered.dir = direction;
-
-    return true;
-  } break;
-  case MATERIAL_TYPE_DIFFUSE_LIGHT: {
-    return false;
-  } break;
-  default: {
-    return false;
-  } break;
-  }
-
-  return false;
+vec3 randomHemisphereDirection(vec3 normal, inout uint rngState) {
+  vec3 dir = randomDirection(rngState);
+  return dir * sign(dot(normal, dir));
 }
 
-vec3 materialEmitted(Material material, float u, float v, vec3 point) {
-  switch (material.type) {
-  case MATERIAL_TYPE_DIFFUSE_LIGHT: {
-    return textureValue(material.texture, u, v, point);
-  } break;
-  default: {
-    return vec3(0.0);
-  } break;
-  }
-  return vec3(0.0);
-}
+HitInfo raySphere(Ray ray, vec3 sphereCentre, float sphereRadius) {
+  HitInfo hitInfo;
+  hitInfo.didHit = false;
+  hitInfo.dst = 0;
+  hitInfo.hitPoint = vec3(0.0);
+  hitInfo.normal = vec3(0.0);
 
-bool intervalContains(Interval interval, float x) {
-  return interval.min <= x && x <= interval.max;
-}
-
-bool intervalSurrounds(Interval interval, float x) {
-  return interval.min < x && x < interval.max;
-}
-
-float intervalClamp(Interval interval, float x) {
-  return clamp(x, interval.min, interval.max);
-}
-
-bool sphereHit(Sphere sphere, Ray ray, Interval interval,
-               inout HitRecord hitRecord) {
-  vec3 oc = ray.origin - sphere.center;
+  vec3 offsetRayOrigin = ray.origin - sphereCentre;
   float a = dot(ray.dir, ray.dir);
-  float halfB = dot(oc, ray.dir);
-  float c = dot(oc, oc) - sphere.radius * sphere.radius;
+  float b = 2 * dot(offsetRayOrigin, ray.dir);
+  float c = dot(offsetRayOrigin, offsetRayOrigin) - sphereRadius * sphereRadius;
+  float discrimintant = b * b - 4 * a * c;
 
-  float discriminant = halfB * halfB - a * c;
-  if (discriminant < 0.0) {
-    return false;
-  }
+  if (discrimintant >= 0) {
+    float dst = (-b - sqrt(discrimintant)) / (2 * a);
 
-  float sqrtd = sqrt(discriminant);
-
-  float root = (-halfB - sqrtd) / a;
-  if (!intervalSurrounds(interval, root)) {
-    root = (-halfB + sqrtd) / a;
-    if (!intervalSurrounds(interval, root)) {
-      return false;
+    if (dst >= 0) {
+      hitInfo.didHit = true;
+      hitInfo.dst = dst;
+      hitInfo.hitPoint = ray.origin + ray.dir * dst;
+      hitInfo.normal = normalize(hitInfo.hitPoint - sphereCentre);
     }
   }
 
-  hitRecord.t = root;
-  hitRecord.point = rayAt(ray, hitRecord.t);
-  vec3 outwardNormal = (hitRecord.point - sphere.center) / sphere.radius;
-  sphereGetUV(outwardNormal, hitRecord.u, hitRecord.v);
-  hitRecordSetFaceNormal(hitRecord, ray, outwardNormal);
-  hitRecord.material = sphere.material;
-
-  return true;
+  return hitInfo;
 }
 
-bool quadHit(Quad quad, Ray ray, Interval interval, inout HitRecord hitRecord) {
-  vec3 n = cross(quad.u, quad.v);
+HitInfo calculateRayCollision(Ray ray) {
+  HitInfo closestHit;
+  closestHit.didHit = false;
+  closestHit.hitPoint = vec3(0.0);
+  closestHit.normal = vec3(0.0);
+  closestHit.dst = FLT_MAX;
 
-  vec3 normal = normalize(n);
-  float d = dot(normal, quad.q);
-  vec3 w = n / dot(n, n);
+  for (int i = 0; i < NUM_SPHERES; i++) {
+    Sphere sphere = spheres[i];
+    HitInfo hitInfo = raySphere(ray, sphere.position, sphere.radius);
 
-  float denom = dot(normal, ray.dir);
-
-  if (abs(denom) < 1e-8) {
-    return false;
-  }
-
-  float t = (d - dot(normal, ray.origin)) / denom;
-  if (!intervalContains(interval, t)) {
-    return false;
-  }
-
-  vec3 intersection = rayAt(ray, t);
-  vec3 planarHitptVector = intersection - quad.q;
-  float alpha = dot(w, cross(planarHitptVector, quad.v));
-  float beta = dot(w, cross(quad.u, planarHitptVector));
-
-  if (!isInterior(alpha, beta, hitRecord)) {
-    return false;
-  }
-
-  hitRecord.t = t;
-  hitRecord.point = intersection;
-  hitRecord.material = quad.material;
-  hitRecordSetFaceNormal(hitRecord, ray, normal);
-
-  return true;
-}
-
-void sphereGetUV(vec3 point, inout float u, inout float v) {
-  float theta = acos(-point.y);
-  float phi = atan(point.x, -point.z) + PI;
-
-  u = phi / (2 * PI);
-  v = theta / PI;
-}
-
-float lengthSquared(vec3 vector) {
-  return vector.x * vector.x + vector.y * vector.y + vector.z * vector.z;
-}
-
-float degreesToRadians(float degrees) { return degrees * PI / 180.0; }
-
-float linearToGamma(float linearComponent) { return sqrt(linearComponent); }
-
-bool nearZero(vec3 vec) {
-  float s = 1e-8;
-  return abs(vec.x) < s && abs(vec.y) < s && abs(vec.z) < s;
-}
-
-uint stepRNG(uint rngState) { return rngState * 747796405 + 1; }
-
-float stepAndOutputRNGFloat(inout uint rngState) {
-  rngState = stepRNG(rngState);
-  uint word = ((rngState >> ((rngState >> 28) + 4)) ^ rngState) * 277803737;
-  word = (word >> 22) ^ word;
-  return float(word) / 4294967295.0f;
-}
-
-float randomFloat() { return stepAndOutputRNGFloat(rngState); }
-
-float randomFloat(float min, float max) {
-  return min + (max - min) * randomFloat();
-}
-
-vec3 randomVector() {
-  return vec3(randomFloat(), randomFloat(), randomFloat());
-}
-
-vec3 randomVector(float min, float max) {
-  return vec3(randomFloat(min, max), randomFloat(min, max),
-              randomFloat(min, max));
-}
-
-vec3 randomInUnitSphere() {
-  while (true) {
-    vec3 point = randomVector(-1, 1);
-    if (lengthSquared(point) < 1) {
-      return point;
+    if (hitInfo.didHit && hitInfo.dst < closestHit.dst) {
+      closestHit = hitInfo;
+      closestHit.material = sphere.material;
     }
   }
 
-  return vec3(0.0);
+  return closestHit;
 }
 
-vec3 randomUnitVector() { return normalize(randomInUnitSphere()); }
+vec3 trace(Ray ray, inout uint rngState) {
+  vec3 incomingLight = vec3(0.0);
+  vec3 rayColour = vec3(1.0);
 
-vec3 randomOnHemisphere(vec3 normal) {
-  vec3 onUnitSphere = randomUnitVector();
-  int multiplier = int(dot(onUnitSphere, normal) > 0.0) * 2 - 1;
+  for (int i = 0; i < MAX_BOUNCE_COUNT; i++) {
+    HitInfo hitInfo = calculateRayCollision(ray);
+    if (hitInfo.didHit) {
+      RayTracingMaterial material = hitInfo.material;
 
-  return onUnitSphere * multiplier;
-}
+      ray.origin = hitInfo.hitPoint;
+      vec3 diffuseDir = normalize(hitInfo.normal + randomDirection(rngState));
+      vec3 specularDir = reflect(ray.dir, hitInfo.normal);
+      bool isSpecularBounce =
+          material.specularProbability >= randomValue(rngState);
+      ray.dir = mix(diffuseDir, specularDir,
+                    material.smoothness * int(isSpecularBounce));
 
-bool worldHit(Ray ray, Interval interval, inout HitRecord hitRecord) {
-  HitRecord tempRecord;
-  bool hitAnything = false;
-  float closestSoFar = interval.max;
-
-  for (int i = 0; i < NUM_SPHERES + NUM_QUADS; ++i) {
-    Interval tempInterval = {interval.min, closestSoFar};
-    if (i < NUM_SPHERES &&
-        sphereHit(spheres[i], ray, tempInterval, tempRecord)) {
-      hitAnything = true;
-      closestSoFar = tempRecord.t;
-      hitRecord = tempRecord;
-    } else if (i < NUM_QUADS &&
-               quadHit(quads[i], ray, tempInterval, tempRecord)) {
-      hitAnything = true;
-      closestSoFar = tempRecord.t;
-      hitRecord = tempRecord;
-    }
-  }
-
-  return hitAnything;
-}
-
-vec3 rayColor(Ray ray) {
-  vec3 result = vec3(1.0);
-  Interval interval = {0.001, FLT_MAX};
-  Ray currentRay = ray;
-  HitRecord record;
-
-  for (int i = 0; i < NUM_BOUNCES; ++i) {
-    if (worldHit(currentRay, interval, record)) {
-      Ray scattered;
-      vec3 attenuation;
-
-      vec3 colorFromEmission =
-          materialEmitted(record.material, record.u, record.v, record.point);
-
-      if (!materialScatter(record.material, currentRay, record, attenuation,
-                           scattered)) {
-        return colorFromEmission * result;
-      }
-
-      result *= attenuation;
-      result += colorFromEmission;
-      currentRay = scattered;
+      vec3 emittedLight = material.emissionColour * material.emissionStrength;
+      incomingLight += emittedLight * rayColour;
+      rayColour *=
+          mix(material.colour, material.specularColour, int(isSpecularBounce));
     } else {
-      return result * BACKGROUND_COLOR;
+      /* TODO: better background colour */
+      incomingLight += vec3(0.5, 0.8, 0.9) * rayColour;
+      break;
     }
   }
 
-  return vec3(0.0);
+  return incomingLight;
+}
+
+vec3 screenToWorldDirection(vec2 point) {
+  vec3 ndc = vec3((2.0f * point.x) / ubo.viewportSize.x - 1.0f,
+                  (2.0f * point.y) / ubo.viewportSize.y - 1.0f, 1.0f);
+
+  vec4 clip = vec4(ndc.x, ndc.y, -1.0f, 1.0f);
+
+  vec4 eye = inverse(ubo.projection) * clip;
+  eye = vec4(eye.x, eye.y, -1.0f, 0.0f);
+
+  vec3 world = vec3(inverse(ubo.view) * eye);
+  world = normalize(world);
+
+  return world;
 }

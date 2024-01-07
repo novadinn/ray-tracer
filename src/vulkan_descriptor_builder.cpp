@@ -1,18 +1,17 @@
 #include "vulkan_descriptor_builder.h"
 
+#include "logger.h"
 #include "vulkan_descriptor_allocator.h"
 #include "vulkan_descriptor_layout_cache.h"
-#include "logger.h"
 
 bool beginDescriptorBuilder(VulkanDescriptorBuilder *out_descriptor_builder) {
-    return true;
+  return true;
 }
 
-void bindDescriptorBuilderBuffer(uint32_t binding,
-                                VkDescriptorBufferInfo *buffer_info,
-                                VkDescriptorType type,
-                                VkShaderStageFlags stage_flags, 
-                                VulkanDescriptorBuilder *out_descriptor_builder) {
+void bindDescriptorBuilderBuffer(
+    uint32_t binding, VkDescriptorBufferInfo *buffer_info,
+    VkDescriptorType type, VkShaderStageFlags stage_flags,
+    VulkanDescriptorBuilder *out_descriptor_builder) {
   VkDescriptorSetLayoutBinding layout_binding = {};
   layout_binding.binding = binding;
   layout_binding.descriptorType = type;
@@ -37,11 +36,10 @@ void bindDescriptorBuilderBuffer(uint32_t binding,
   out_descriptor_builder->writes.emplace_back(write_descriptor_set);
 }
 
-void bindDescriptorBuilderImage(uint32_t binding,
-                                VkDescriptorImageInfo *image_info,
-                                VkDescriptorType type,
-                                VkShaderStageFlags stage_flags, 
-                                VulkanDescriptorBuilder *out_descriptor_builder) {
+void bindDescriptorBuilderImage(
+    uint32_t binding, VkDescriptorImageInfo *image_info, VkDescriptorType type,
+    VkShaderStageFlags stage_flags,
+    VulkanDescriptorBuilder *out_descriptor_builder) {
   VkDescriptorSetLayoutBinding layout_binding = {};
   layout_binding.binding = binding;
   layout_binding.descriptorType = type;
@@ -66,7 +64,9 @@ void bindDescriptorBuilderImage(uint32_t binding,
   out_descriptor_builder->writes.emplace_back(write_descriptor_set);
 }
 
-bool endDescriptorBuilder(VulkanDescriptorBuilder *descriptor_builder, VulkanDevice *device, VkDescriptorSet *out_set, VkDescriptorSetLayout *out_layout) {
+bool endDescriptorBuilder(VulkanDescriptorBuilder *descriptor_builder,
+                          VulkanDevice *device, VkDescriptorSet *out_set,
+                          VkDescriptorSetLayout *out_layout) {
   VkDescriptorSetLayoutCreateInfo layout_info = {};
   layout_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
   layout_info.pNext = 0;
@@ -76,7 +76,8 @@ bool endDescriptorBuilder(VulkanDescriptorBuilder *descriptor_builder, VulkanDev
 
   *out_layout = createDescriptorLayoutFromCache(device, &layout_info);
 
-  if(!allocateDescriptorSetFromDescriptorAllocator(device, *out_layout, out_set)) {
+  if (!allocateDescriptorSetFromDescriptorAllocator(device, *out_layout,
+                                                    out_set)) {
     ERROR("Failed to allocate a descriptor set!");
     return false;
   }
@@ -85,13 +86,15 @@ bool endDescriptorBuilder(VulkanDescriptorBuilder *descriptor_builder, VulkanDev
     w.dstSet = *out_set;
   }
 
-  vkUpdateDescriptorSets(device->logical_device, descriptor_builder->writes.size(),
+  vkUpdateDescriptorSets(device->logical_device,
+                         descriptor_builder->writes.size(),
                          descriptor_builder->writes.data(), 0, 0);
 
   return true;
 }
 
-bool endDescriptorBuilder(VulkanDescriptorBuilder *descriptor_builder, VulkanDevice *device, VkDescriptorSet *out_set) {
+bool endDescriptorBuilder(VulkanDescriptorBuilder *descriptor_builder,
+                          VulkanDevice *device, VkDescriptorSet *out_set) {
   VkDescriptorSetLayout layout;
   return endDescriptorBuilder(descriptor_builder, device, out_set, &layout);
 }
