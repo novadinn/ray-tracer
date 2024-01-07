@@ -39,6 +39,12 @@ struct UniformBufferObject {
   glm::vec4 viewportSize;
   glm::vec4 cameraPosition;
   glm::vec4 frame;
+  glm::vec4 groundColour;
+  glm::vec4 skyColourHorizon;
+  glm::vec4 skyColourZenith;
+  glm::vec4 sunPosition;
+  float sunFocus;
+  float sunInternsity;
 };
 
 VKAPI_ATTR VkBool32 VKAPI_CALL vulkanDebugCallback(
@@ -539,6 +545,12 @@ int main(int argc, char **argv) {
     ubo.viewportSize =
         glm::vec4(camera.viewport_width, camera.viewport_height, 0.0, 0.0);
     ubo.cameraPosition = glm::vec4(glm::vec3(0.0), 0.0);
+    ubo.groundColour = glm::vec4(0.2, 0.2, 0.2, 1.0);
+    ubo.skyColourHorizon = glm::vec4(1.0);
+    ubo.skyColourZenith = glm::vec4(0.2, 0.3, 0.35, 1.0);
+    ubo.sunPosition = glm::normalize(glm::vec4(1));
+    ubo.sunFocus = 1.0;
+    ubo.sunInternsity = 0.5;
 
     if (!loadBufferData(&ubo_buffer, vma_allocator, &ubo)) {
       FATAL("Failed to load a buffer data!");

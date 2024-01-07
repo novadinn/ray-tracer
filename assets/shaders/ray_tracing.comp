@@ -18,6 +18,12 @@ layout(set = 1, binding = 0) uniform UniformBufferObject {
   vec4 viewportSize;
   vec4 cameraPosition;
   vec4 frame;
+  vec4 groundColour;
+  vec4 skyColourHorizon;
+  vec4 skyColourZenith;
+  vec4 sunPosition;
+  float sunFocus;
+  float sunInternsity;
 }
 ubo;
 
@@ -60,8 +66,9 @@ HitInfo raySphere(Ray ray, vec3 sphereCentre, float sphereRadius);
 HitInfo calculateRayCollision(Ray ray);
 vec3 trace(Ray ray, inout uint rngState);
 vec3 screenToWorldDirection(vec2 point);
+vec3 getEnvironmentLight(Ray ray);
 
-#define NUM_SPHERES 4
+#define NUM_SPHERES 3
 Sphere spheres[NUM_SPHERES];
 
 void main() {
@@ -91,16 +98,6 @@ void main() {
   spheres[index].material.colour = vec3(0.2, 0.8, 0.05);
   spheres[index].material.emissionColour = vec3(0);
   spheres[index].material.emissionStrength = 0;
-  spheres[index].material.smoothness = 0.0;
-  spheres[index].material.specularProbability = 0.0;
-  spheres[index].material.specularColour = vec3(1.0);
-
-  index = 3;
-  spheres[index].position = vec3(-70, 0, 15);
-  spheres[index].radius = 40.0;
-  spheres[index].material.colour = vec3(0, 1, 0);
-  spheres[index].material.emissionColour = vec3(5, 5, 5);
-  spheres[index].material.emissionStrength = 1;
   spheres[index].material.smoothness = 0.0;
   spheres[index].material.specularProbability = 0.0;
   spheres[index].material.specularColour = vec3(1.0);
@@ -242,7 +239,7 @@ vec3 trace(Ray ray, inout uint rngState) {
           mix(material.colour, material.specularColour, int(isSpecularBounce));
     } else {
       /* TODO: better background colour */
-      incomingLight += vec3(0.5, 0.8, 0.9) * rayColour;
+      incomingLight += getEnvironmentLight(ray) * rayColour;
       break;
     }
   }
@@ -263,4 +260,17 @@ vec3 screenToWorldDirection(vec2 point) {
   world = normalize(world);
 
   return world;
+}
+
+vec3 getEnvironmentLight(Ray ray) {
+  float skyGradientT = pow(smoothstep(0, 0.4, ray.dir.y), 0.35);
+  float groundToSkyT = smoothstep(-0.01, 0, ray.dir.y);
+  vec3 skyGradient =
+      mix(ubo.skyColourHorizon.xyz, ubo.skyColourZenith.xyz, skyGradientT);
+  float sun = pow(max(0, dot(ray.dir, ubo.sunPosition.xyz)), ubo.sunFocus) *
+              ubo.sunInternsity;
+  vec3 composite = mix(ubo.groundColour.xyz, skyGradient, groundToSkyT) +
+                   sun * int(groundToSkyT >= 1);
+
+  return composite;
 }
