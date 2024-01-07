@@ -122,10 +122,6 @@ void main() {
     ray.origin = ubo.cameraPosition.xyz + vec3(defocusJitter / imageSize, 0.0);
     vec2 jitter =
         randomPointInCircle(rngState) * DIVERGE_STRENGTH / imageSize.x;
-    // ray.dir = normalize(
-    //     vec3((-1.0 + 2.0 * uv + (jitter / imageSize)) *
-    //     vec2(aspectRatio, 1.0),
-    //          -1.0));
     ray.dir =
         screenToWorldDirection(gl_GlobalInvocationID.xy) + vec3(jitter, 0.0);
 

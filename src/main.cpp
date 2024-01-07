@@ -528,8 +528,10 @@ int main(int argc, char **argv) {
     glm::ivec2 wheel_movement;
     Input::GetWheelMovement(&wheel_movement.x, &wheel_movement.y);
 
+    bool camera_is_dirty = false;
     if (Input::WasMouseButtonHeld(SDL_BUTTON_MIDDLE)) {
       cameraRotate(&camera, mouse_delta);
+      camera_is_dirty = true;
     }
 
     ubo.view = cameraGetViewMatrix(&camera);
@@ -784,6 +786,9 @@ int main(int argc, char **argv) {
     Input::GetMousePosition(&previous_mouse.x, &previous_mouse.y);
 
     ubo.frame.x++;
+    if (camera_is_dirty) {
+      ubo.frame.x = 0;
+    }
   }
 
   vkDeviceWaitIdle(device.logical_device);
