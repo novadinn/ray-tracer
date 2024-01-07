@@ -27,6 +27,9 @@
 #define VMA_IMPLEMENTATION
 #include "vk_mem_alloc.h"
 #define STB_IMAGE_IMPLEMENTATION
+#include "imgui/backends/imgui_impl_sdl2.h"
+#include "imgui/backends/imgui_impl_vulkan.h"
+#include "imgui/imgui.h"
 #include "stb/stb_image.h"
 
 #if PLATFORM_APPLE == 1
@@ -479,6 +482,53 @@ int main(int argc, char **argv) {
     exit(1);
   }
 
+  VkDescriptorPoolSize pool_sizes[] = {
+      {VK_DESCRIPTOR_TYPE_SAMPLER, 1000},
+      {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1000},
+      {VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1000},
+      {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1000},
+      {VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER, 1000},
+      {VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER, 1000},
+      {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1000},
+      {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1000},
+      {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 1000},
+      {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC, 1000},
+      {VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT, 1000}};
+
+  VkDescriptorPoolCreateInfo pool_info = {};
+  pool_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+  pool_info.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+  pool_info.maxSets = 1000;
+  pool_info.poolSizeCount = std::size(pool_sizes);
+  pool_info.pPoolSizes = pool_sizes;
+
+  VkDescriptorPool imgui_pool;
+  VK_CHECK(vkCreateDescriptorPool(device.logical_device, &pool_info, 0,
+                                  &imgui_pool));
+
+  IMGUI_CHECKVERSION();
+  ImGui::CreateContext();
+  ImGuiIO &io = ImGui::GetIO();
+  (void)io;
+
+  ImGui::StyleColorsDark();
+
+  ImGui_ImplSDL2_InitForVulkan(window);
+
+  ImGui_ImplVulkan_InitInfo init_info = {};
+  init_info.Instance = instance;
+  init_info.PhysicalDevice = device.physical_device;
+  init_info.Device = device.logical_device;
+  init_info.Queue = graphics_queue;
+  init_info.DescriptorPool = imgui_pool;
+  init_info.MinImageCount = 3;
+  init_info.ImageCount = 3;
+  init_info.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
+
+  ImGui_ImplVulkan_Init(&init_info, render_pass);
+
+  ImGui_ImplVulkan_CreateFontsTexture();
+
   Camera camera;
   createCamera(90, window_width / window_height, 0.01f, 10000.0f, &camera);
 
@@ -493,6 +543,8 @@ int main(int argc, char **argv) {
     Input::Begin();
 
     while (SDL_PollEvent(&event)) {
+      ImGui_ImplSDL2_ProcessEvent(&event);
+
       switch (event.type) {
       case SDL_KEYDOWN: {
         if (!event.key.repeat) {
@@ -556,6 +608,12 @@ int main(int argc, char **argv) {
       FATAL("Failed to load a buffer data!");
       exit(1);
     }
+
+    ImGui_ImplVulkan_NewFrame();
+    ImGui_ImplSDL2_NewFrame(window);
+    ImGui::NewFrame();
+    ImGui::ShowDemoWindow();
+    ImGui::Render();
 
     vkDeviceWaitIdle(device.logical_device);
 
@@ -730,6 +788,8 @@ int main(int argc, char **argv) {
 
     vkCmdDraw(graphics_command_buffer, 4, 1, 0, 0);
 
+    ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(),
+                                    graphics_command_buffer, 0);
     vkCmdEndRenderPass(graphics_command_buffer);
 
     if (graphics_family_index != compute_family_index) {
@@ -804,6 +864,12 @@ int main(int argc, char **argv) {
   }
 
   vkDeviceWaitIdle(device.logical_device);
+
+  ImGui_ImplVulkan_Shutdown();
+  ImGui_ImplSDL2_Shutdown();
+  ImGui::DestroyContext();
+
+  vkDestroyDescriptorPool(device.logical_device, imgui_pool, 0);
 
   shutdownDescriptorLayoutCache(&device);
 

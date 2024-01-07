@@ -36,9 +36,18 @@ include_directories(
   vendor/
   vendor/glm
   vendor/VulkanMemoryAllocator/include
+  vendor/imgui
+)
+
+FILE(GLOB IMGUISRC 
+  "vendor/imgui/*.cpp" 
+  "vendor/imgui/misc/cpp/*.cpp" 
+  "vendor/imgui/backends/imgui_impl_sdl2.cpp" 
+  "vendor/imgui/backends/imgui_impl_vulkan.cpp"
 )
 
 add_executable(${PROJECT_NAME} 
+  ${IMGUISRC}
   src/main.cpp 
   src/logger.cpp 
   src/camera.cpp
