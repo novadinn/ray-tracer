@@ -39,24 +39,24 @@
 struct UniformBufferObject {
   glm::mat4 view;
   glm::mat4 projection;
-  glm::vec4 viewportSize;
-  glm::vec4 cameraPosition;
-  glm::vec4 renderSettings;
+  glm::vec4 viewport_size;
+  glm::vec4 camera_position;
+  glm::vec4 render_settings;
   glm::vec4 frame;
-  glm::vec4 groundColour;
-  glm::vec4 skyColourHorizon;
-  glm::vec4 skyColourZenith;
-  glm::vec4 sunPosition;
-  float sunFocus;
-  float sunIntensity;
-  float defocusStrenght;
-  float divergeStrength;
+  glm::vec4 ground_colour;
+  glm::vec4 sky_colour_horizon;
+  glm::vec4 sky_colour_zenith;
+  glm::vec4 sun_position;
+  float sun_focus;
+  float sun_intensity;
+  float defocus_strenght;
+  float diverge_strength;
 };
 
 struct RayTracingMaterial {
   glm::vec4 colour;
-  glm::vec4 emissionColour;
-  glm::vec4 specularColour;
+  glm::vec4 emission_colour;
+  glm::vec4 specular_colour;
 };
 
 struct Sphere {
@@ -484,12 +484,12 @@ int main(int argc, char **argv) {
     exit(1);
   }
 
-  VulkanBuffer ubo_buffer;
+  VulkanBuffer compute_ubo_buffer;
   if (!createBuffer(vma_allocator, sizeof(UniformBufferObject),
                     VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
                     VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
                         VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-                    VMA_MEMORY_USAGE_CPU_TO_GPU, &ubo_buffer)) {
+                    VMA_MEMORY_USAGE_CPU_TO_GPU, &compute_ubo_buffer)) {
     FATAL("Failed to create a uniform buffer!");
     exit(1);
   }
@@ -502,9 +502,9 @@ int main(int argc, char **argv) {
     exit(1);
   }
   VkDescriptorBufferInfo descriptor_buffer_info = {};
-  descriptor_buffer_info.buffer = ubo_buffer.handle;
+  descriptor_buffer_info.buffer = compute_ubo_buffer.handle;
   descriptor_buffer_info.offset = 0;
-  descriptor_buffer_info.range = ubo_buffer.size;
+  descriptor_buffer_info.range = compute_ubo_buffer.size;
   bindDescriptorBuilderBuffer(0, &descriptor_buffer_info,
                               VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
                               VK_SHADER_STAGE_COMPUTE_BIT, &descriptor_builder);
@@ -520,33 +520,33 @@ int main(int argc, char **argv) {
   spheres[index].position = glm::vec3(0, 0, -5);
   spheres[index].radius = 1.0;
   spheres[index].material.colour = glm::vec4(0.5, 0.5, 0.5, 1.0);
-  spheres[index].material.emissionColour = glm::vec4(0);
-  spheres[index].material.specularColour = glm::vec4(1.0, 1.0, 1.0, 0.5);
+  spheres[index].material.emission_colour = glm::vec4(0);
+  spheres[index].material.specular_colour = glm::vec4(1.0, 1.0, 1.0, 0.5);
 
   index = 1;
   spheres[index].position = glm::vec3(3, 0, -5);
   spheres[index].radius = 1.0;
   spheres[index].material.colour = glm::vec4(0.8, 0.2, 0.2, 0.5);
-  spheres[index].material.emissionColour = glm::vec4(0);
-  spheres[index].material.specularColour = glm::vec4(1.0, 1.0, 1.0, 0.0);
+  spheres[index].material.emission_colour = glm::vec4(0);
+  spheres[index].material.specular_colour = glm::vec4(1.0, 1.0, 1.0, 0.0);
 
   index = 2;
   spheres[index].position = glm::vec3(0, -101, -5);
   spheres[index].radius = 100.0;
   spheres[index].material.colour = glm::vec4(0.2, 0.8, 0.05, 0.0);
-  spheres[index].material.emissionColour = glm::vec4(0);
-  spheres[index].material.specularColour = glm::vec4(1.0, 1.0, 1.0, 0.0);
+  spheres[index].material.emission_colour = glm::vec4(0);
+  spheres[index].material.specular_colour = glm::vec4(1.0, 1.0, 1.0, 0.0);
 
-  VulkanBuffer spheres_ssbo;
+  VulkanBuffer compute_ssbo;
   if (!createBuffer(vma_allocator, spheres.size() * sizeof(Sphere),
                     VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
                         VK_BUFFER_USAGE_TRANSFER_DST_BIT,
                     VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-                    VMA_MEMORY_USAGE_GPU_ONLY, &spheres_ssbo)) {
+                    VMA_MEMORY_USAGE_GPU_ONLY, &compute_ssbo)) {
     FATAL("Failed to create a SSBO!");
     exit(1);
   }
-  if (!loadBufferDataStaging(&spheres_ssbo, &device, vma_allocator,
+  if (!loadBufferDataStaging(&compute_ssbo, &device, vma_allocator,
                              spheres.data(), graphics_queue,
                              graphics_command_pool)) {
     FATAL("Failed to load SSBO data!");
@@ -561,9 +561,9 @@ int main(int argc, char **argv) {
     exit(1);
   }
   descriptor_buffer_info = {};
-  descriptor_buffer_info.buffer = spheres_ssbo.handle;
+  descriptor_buffer_info.buffer = compute_ssbo.handle;
   descriptor_buffer_info.offset = 0;
-  descriptor_buffer_info.range = spheres_ssbo.size;
+  descriptor_buffer_info.range = compute_ssbo.size;
   bindDescriptorBuilderBuffer(0, &descriptor_buffer_info,
                               VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
                               VK_SHADER_STAGE_COMPUTE_BIT, &descriptor_builder);
@@ -624,16 +624,16 @@ int main(int argc, char **argv) {
   createCamera(90, window_width / window_height, 0.01f, 10000.0f, &camera);
 
   UniformBufferObject ubo = {};
-  ubo.renderSettings.x = 50;
-  ubo.renderSettings.y = 25;
-  ubo.groundColour = glm::vec4(0.35, 0.3, 0.35, 1.0);
-  ubo.skyColourHorizon = glm::vec4(1.0);
-  ubo.skyColourZenith = glm::vec4(0.078, 0.36, 0.72, 1.0);
-  ubo.sunPosition = glm::normalize(glm::vec4(1.0));
-  ubo.sunFocus = 1.0;
-  ubo.sunIntensity = 0;
-  ubo.defocusStrenght = 0.0;
-  ubo.divergeStrength = 1.0;
+  ubo.render_settings.x = 50;
+  ubo.render_settings.y = 25;
+  ubo.ground_colour = glm::vec4(0.35, 0.3, 0.35, 1.0);
+  ubo.sky_colour_horizon = glm::vec4(1.0);
+  ubo.sky_colour_zenith = glm::vec4(0.078, 0.36, 0.72, 1.0);
+  ubo.sun_position = glm::normalize(glm::vec4(1.0));
+  ubo.sun_focus = 1.0;
+  ubo.sun_intensity = 0;
+  ubo.defocus_strenght = 0.0;
+  ubo.diverge_strength = 1.0;
 
   bool running = true;
   glm::ivec2 previous_mouse = {0, 0};
@@ -696,11 +696,11 @@ int main(int argc, char **argv) {
 
     ubo.view = cameraGetViewMatrix(&camera);
     ubo.projection = cameraGetProjectionMatrix(&camera);
-    ubo.viewportSize =
+    ubo.viewport_size =
         glm::vec4(camera.viewport_width, camera.viewport_height, 0.0, 0.0);
-    ubo.cameraPosition = glm::vec4(glm::vec3(0.0), 0.0);
+    ubo.camera_position = glm::vec4(glm::vec3(0.0), 0.0);
 
-    if (!loadBufferData(&ubo_buffer, vma_allocator, &ubo)) {
+    if (!loadBufferData(&compute_ubo_buffer, vma_allocator, &ubo)) {
       FATAL("Failed to load a buffer data!");
       exit(1);
     }
@@ -710,67 +710,67 @@ int main(int argc, char **argv) {
     ImGui::NewFrame();
 
     if (ImGui::Begin("Render settings")) {
-      int samples = ubo.renderSettings.x;
+      int samples = ubo.render_settings.x;
       if (ImGui::DragInt("Number of Samples", &samples, 1.0f, 1, INT_MAX)) {
-        ubo.renderSettings.x = samples;
+        ubo.render_settings.x = samples;
         camera_is_dirty = true;
       }
-      int bounce_count = ubo.renderSettings.y;
+      int bounce_count = ubo.render_settings.y;
       if (ImGui::DragInt("Bounce Count", &bounce_count, 1.0f, 1, INT_MAX)) {
-        ubo.renderSettings.y = bounce_count;
+        ubo.render_settings.y = bounce_count;
         camera_is_dirty = true;
       }
 
-      glm::vec3 ground_colour = glm::vec3(ubo.groundColour);
+      glm::vec3 ground_colour = glm::vec3(ubo.ground_colour);
       if (ImGui::DragFloat3("Ground Colour", &ground_colour.x, 0.1f, 0.0f,
                             1.0f)) {
-        ubo.groundColour = glm::vec4(ground_colour, 1.0);
+        ubo.ground_colour = glm::vec4(ground_colour, 1.0);
         camera_is_dirty = true;
       }
 
-      glm::vec3 sky_colour_horizon = glm::vec3(ubo.skyColourHorizon);
+      glm::vec3 sky_colour_horizon = glm::vec3(ubo.sky_colour_horizon);
       if (ImGui::DragFloat3("Sky Colour Horizon", &sky_colour_horizon.x, 0.1f,
                             0.0f, 1.0f)) {
-        ubo.skyColourHorizon = glm::vec4(sky_colour_horizon, 1.0);
+        ubo.sky_colour_horizon = glm::vec4(sky_colour_horizon, 1.0);
         camera_is_dirty = true;
       }
 
-      glm::vec3 sky_colour_zenith = glm::vec3(ubo.skyColourZenith);
+      glm::vec3 sky_colour_zenith = glm::vec3(ubo.sky_colour_zenith);
       if (ImGui::DragFloat3("Sky Colour Zenith", &sky_colour_zenith.x, 0.1f,
                             0.0f, 1.0f)) {
-        ubo.skyColourZenith = glm::vec4(sky_colour_zenith, 1.0);
+        ubo.sky_colour_zenith = glm::vec4(sky_colour_zenith, 1.0);
         camera_is_dirty = true;
       }
 
-      glm::vec3 sun_position = glm::vec3(ubo.sunPosition);
+      glm::vec3 sun_position = glm::vec3(ubo.sun_position);
       if (ImGui::DragFloat3("Sun Position", &sun_position.x, 0.1f)) {
-        ubo.sunPosition = glm::vec4(sun_position, 1.0);
+        ubo.sun_position = glm::vec4(sun_position, 1.0);
         camera_is_dirty = true;
       }
 
-      float sun_focus = ubo.sunFocus;
+      float sun_focus = ubo.sun_focus;
       if (ImGui::DragFloat("Sun Focus", &sun_focus, 0.1f, 0, FLT_MAX)) {
-        ubo.sunFocus = sun_focus;
+        ubo.sun_focus = sun_focus;
         camera_is_dirty = true;
       }
 
-      float sun_intensity = ubo.sunIntensity;
+      float sun_intensity = ubo.sun_intensity;
       if (ImGui::DragFloat("Sun Intensity", &sun_intensity, 0.1f, 0, FLT_MAX)) {
-        ubo.sunIntensity = sun_intensity;
+        ubo.sun_intensity = sun_intensity;
         camera_is_dirty = true;
       }
 
-      float defocus_strenght = ubo.defocusStrenght;
+      float defocus_strenght = ubo.defocus_strenght;
       if (ImGui::DragFloat("Defocus Strength", &defocus_strenght, 0.1f, 0,
                            FLT_MAX)) {
-        ubo.defocusStrenght = defocus_strenght;
+        ubo.defocus_strenght = defocus_strenght;
         camera_is_dirty = true;
       }
 
-      float divergeStrength = ubo.divergeStrength;
-      if (ImGui::DragFloat("Diverge Strength", &divergeStrength, 0.1f, 0,
+      float diverge_strength = ubo.diverge_strength;
+      if (ImGui::DragFloat("Diverge Strength", &diverge_strength, 0.1f, 0,
                            FLT_MAX)) {
-        ubo.divergeStrength = divergeStrength;
+        ubo.diverge_strength = diverge_strength;
         camera_is_dirty = true;
       }
 
@@ -1043,8 +1043,8 @@ int main(int argc, char **argv) {
 
   destroyPipeline(&compute_pipeline, &device);
 
-  destroyBuffer(&spheres_ssbo, vma_allocator);
-  destroyBuffer(&ubo_buffer, vma_allocator);
+  destroyBuffer(&compute_ssbo, vma_allocator);
+  destroyBuffer(&compute_ubo_buffer, vma_allocator);
 
   destroyTexture(&texture, &device, vma_allocator);
 
