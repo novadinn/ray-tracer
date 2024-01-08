@@ -53,6 +53,18 @@ struct UniformBufferObject {
   float divergeStrength;
 };
 
+struct RayTracingMaterial {
+  glm::vec4 colour;
+  glm::vec4 emissionColour;
+  glm::vec4 specularColour;
+};
+
+struct Sphere {
+  glm::vec3 position;
+  float radius;
+  RayTracingMaterial material;
+};
+
 VKAPI_ATTR VkBool32 VKAPI_CALL vulkanDebugCallback(
     VkDebugUtilsMessageSeverityFlagBitsEXT message_severity,
     VkDebugUtilsMessageTypeFlagsEXT message_types,
@@ -349,12 +361,29 @@ int main(int argc, char **argv) {
       pipelineShaderStageCreateInfo(VK_SHADER_STAGE_COMPUTE_BIT,
                                     compute_shader_module);
 
+  VkDescriptorSetLayoutBinding compute_ssbo_descriptor_set_layout_binding =
+      descriptorSetLayoutBinding(0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                                 VK_SHADER_STAGE_COMPUTE_BIT);
+  VkDescriptorSetLayoutCreateInfo compute_ssbo_layout_create_info = {};
+  compute_ssbo_layout_create_info.sType =
+      VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+  compute_ssbo_layout_create_info.pNext = 0;
+  compute_ssbo_layout_create_info.flags = 0;
+  compute_ssbo_layout_create_info.bindingCount = 1;
+  compute_ssbo_layout_create_info.pBindings =
+      &compute_ssbo_descriptor_set_layout_binding;
+
+  VkDescriptorSetLayout compute_descriptor_set_layout_ssbo =
+      createDescriptorLayoutFromCache(&device,
+                                      &compute_ssbo_layout_create_info);
+
   VulkanPipeline compute_pipeline;
-  if (!createComputePipeline(
-          &device,
-          std::vector<VkDescriptorSetLayout>{compute_descriptor_set_layout,
-                                             compute_descriptor_set_layout_ubo},
-          compute_stage_create_info, &compute_pipeline)) {
+  if (!createComputePipeline(&device,
+                             std::vector<VkDescriptorSetLayout>{
+                                 compute_descriptor_set_layout,
+                                 compute_descriptor_set_layout_ubo,
+                                 compute_descriptor_set_layout_ssbo},
+                             compute_stage_create_info, &compute_pipeline)) {
     FATAL("Failed to create a compute pipeline!");
     exit(1);
   }
@@ -481,6 +510,65 @@ int main(int argc, char **argv) {
                               VK_SHADER_STAGE_COMPUTE_BIT, &descriptor_builder);
   if (!endDescriptorBuilder(&descriptor_builder, &device,
                             &compute_ubo_descriptor_set)) {
+    FATAL("Failed to create a descriptor set!");
+    exit(1);
+  }
+
+  std::vector<Sphere> spheres;
+  spheres.resize(3);
+  int index = 0;
+  spheres[index].position = glm::vec3(0, 0, -5);
+  spheres[index].radius = 1.0;
+  spheres[index].material.colour = glm::vec4(0.5, 0.5, 0.5, 1.0);
+  spheres[index].material.emissionColour = glm::vec4(0);
+  spheres[index].material.specularColour = glm::vec4(1.0, 1.0, 1.0, 0.5);
+
+  index = 1;
+  spheres[index].position = glm::vec3(3, 0, -5);
+  spheres[index].radius = 1.0;
+  spheres[index].material.colour = glm::vec4(0.8, 0.2, 0.2, 0.5);
+  spheres[index].material.emissionColour = glm::vec4(0);
+  spheres[index].material.specularColour = glm::vec4(1.0, 1.0, 1.0, 0.0);
+
+  index = 2;
+  spheres[index].position = glm::vec3(0, -101, -5);
+  spheres[index].radius = 100.0;
+  spheres[index].material.colour = glm::vec4(0.2, 0.8, 0.05, 0.0);
+  spheres[index].material.emissionColour = glm::vec4(0);
+  spheres[index].material.specularColour = glm::vec4(1.0, 1.0, 1.0, 0.0);
+
+  VulkanBuffer spheres_ssbo;
+  if (!createBuffer(vma_allocator, spheres.size() * sizeof(Sphere),
+                    VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+                        VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                    VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+                    VMA_MEMORY_USAGE_GPU_ONLY, &spheres_ssbo)) {
+    FATAL("Failed to create a SSBO!");
+    exit(1);
+  }
+  if (!loadBufferDataStaging(&spheres_ssbo, &device, vma_allocator,
+                             spheres.data(), graphics_queue,
+                             graphics_command_pool)) {
+    FATAL("Failed to load SSBO data!");
+    exit(1);
+  }
+
+  descriptor_builder = {};
+
+  VkDescriptorSet compute_ssbo_descriptor_set;
+  if (!beginDescriptorBuilder(&descriptor_builder)) {
+    FATAL("Failed to create a descriptor set!");
+    exit(1);
+  }
+  descriptor_buffer_info = {};
+  descriptor_buffer_info.buffer = spheres_ssbo.handle;
+  descriptor_buffer_info.offset = 0;
+  descriptor_buffer_info.range = spheres_ssbo.size;
+  bindDescriptorBuilderBuffer(0, &descriptor_buffer_info,
+                              VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                              VK_SHADER_STAGE_COMPUTE_BIT, &descriptor_builder);
+  if (!endDescriptorBuilder(&descriptor_builder, &device,
+                            &compute_ssbo_descriptor_set)) {
     FATAL("Failed to create a descriptor set!");
     exit(1);
   }
@@ -736,6 +824,10 @@ int main(int argc, char **argv) {
     vkCmdBindDescriptorSets(
         compute_command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE,
         compute_pipeline.layout, 1, 1, &compute_ubo_descriptor_set, 0, 0);
+    vkCmdBindDescriptorSets(
+        compute_command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE,
+        compute_pipeline.layout, 2, 1, &compute_ssbo_descriptor_set, 0, 0);
+
     vkCmdDispatch(compute_command_buffer, texture.width / 16,
                   texture.height / 16, 1);
 
@@ -951,6 +1043,7 @@ int main(int argc, char **argv) {
 
   destroyPipeline(&compute_pipeline, &device);
 
+  destroyBuffer(&spheres_ssbo, vma_allocator);
   destroyBuffer(&ubo_buffer, vma_allocator);
 
   destroyTexture(&texture, &device, vma_allocator);

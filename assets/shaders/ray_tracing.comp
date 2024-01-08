@@ -4,6 +4,35 @@
 #define FLT_MAX 3.402823466e+38
 
 layout(local_size_x = 16, local_size_y = 16) in;
+
+struct Ray {
+  vec3 origin;
+  vec3 dir;
+};
+
+struct RayTracingMaterial {
+  /* a - smoothness */
+  vec4 colour;
+  /* a - emissionStrength */
+  vec4 emissionColour;
+  /* a - specularProbability */
+  vec4 specularColour;
+};
+
+struct HitInfo {
+  bool didHit;
+  float dst;
+  vec3 hitPoint;
+  vec3 normal;
+  RayTracingMaterial material;
+};
+
+struct Sphere {
+  vec3 position;
+  float radius;
+  RayTracingMaterial material;
+};
+
 layout(set = 0, binding = 0, rgba8) uniform image2D resultImage;
 
 layout(set = 1, binding = 0) uniform UniformBufferObject {
@@ -24,32 +53,8 @@ layout(set = 1, binding = 0) uniform UniformBufferObject {
 }
 ubo;
 
-struct Ray {
-  vec3 origin;
-  vec3 dir;
-};
-
-struct RayTracingMaterial {
-  vec3 colour;
-  vec3 emissionColour;
-  float emissionStrength;
-  float smoothness;
-  float specularProbability;
-  vec3 specularColour;
-};
-
-struct HitInfo {
-  bool didHit;
-  float dst;
-  vec3 hitPoint;
-  vec3 normal;
-  RayTracingMaterial material;
-};
-
-struct Sphere {
-  vec3 position;
-  float radius;
-  RayTracingMaterial material;
+layout(std140, set = 2, binding = 0) readonly buffer Spheres {
+  Sphere spheres[];
 };
 
 uint nextRandom(inout uint state);
@@ -66,40 +71,7 @@ vec3 screenToWorldDirection(vec2 point);
 vec3 getEnvironmentLight(Ray ray);
 float linearToGamma(float linearComponent);
 
-#define NUM_SPHERES 3
-Sphere spheres[NUM_SPHERES];
-
 void main() {
-  int index = 0;
-  spheres[index].position = vec3(0, 0, -5);
-  spheres[index].radius = 1.0;
-  spheres[index].material.colour = vec3(0.5, 0.5, 0.5);
-  spheres[index].material.emissionColour = vec3(0);
-  spheres[index].material.emissionStrength = 0;
-  spheres[index].material.smoothness = 1.0;
-  spheres[index].material.specularProbability = 0.5;
-  spheres[index].material.specularColour = vec3(1.0);
-
-  index = 1;
-  spheres[index].position = vec3(3, 0, -5);
-  spheres[index].radius = 1.0;
-  spheres[index].material.colour = vec3(0.8, 0.2, 0.2);
-  spheres[index].material.emissionColour = vec3(0);
-  spheres[index].material.emissionStrength = 0;
-  spheres[index].material.smoothness = 0.5;
-  spheres[index].material.specularProbability = 0.0;
-  spheres[index].material.specularColour = vec3(1.0);
-
-  index = 2;
-  spheres[index].position = vec3(0, -101, -5);
-  spheres[index].radius = 100.0;
-  spheres[index].material.colour = vec3(0.2, 0.8, 0.05);
-  spheres[index].material.emissionColour = vec3(0);
-  spheres[index].material.emissionStrength = 0;
-  spheres[index].material.smoothness = 0.0;
-  spheres[index].material.specularProbability = 0.0;
-  spheres[index].material.specularColour = vec3(1.0);
-
   ivec2 imageSize = imageSize(resultImage);
   vec2 uv = vec2(gl_GlobalInvocationID.xy) / imageSize;
 
@@ -204,7 +176,7 @@ HitInfo calculateRayCollision(Ray ray) {
   closestHit.normal = vec3(0.0);
   closestHit.dst = FLT_MAX;
 
-  for (int i = 0; i < NUM_SPHERES; i++) {
+  for (int i = 0; i < spheres.length(); i++) {
     Sphere sphere = spheres[i];
     HitInfo hitInfo = raySphere(ray, sphere.position, sphere.radius);
 
@@ -230,14 +202,15 @@ vec3 trace(Ray ray, inout uint rngState) {
       vec3 diffuseDir = normalize(hitInfo.normal + randomDirection(rngState));
       vec3 specularDir = reflect(ray.dir, hitInfo.normal);
       bool isSpecularBounce =
-          material.specularProbability >= randomValue(rngState);
+          material.specularColour.w >= randomValue(rngState);
       ray.dir = mix(diffuseDir, specularDir,
-                    material.smoothness * int(isSpecularBounce));
+                    material.colour.w * int(isSpecularBounce));
 
-      vec3 emittedLight = material.emissionColour * material.emissionStrength;
+      vec3 emittedLight =
+          material.emissionColour.xyz * material.emissionColour.w;
       incomingLight += emittedLight * rayColour;
-      rayColour *=
-          mix(material.colour, material.specularColour, int(isSpecularBounce));
+      rayColour *= mix(material.colour.xyz, material.specularColour.xyz,
+                       int(isSpecularBounce));
     } else {
       /* TODO: better background colour */
       incomingLight += getEnvironmentLight(ray) * rayColour;
