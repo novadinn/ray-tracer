@@ -41,13 +41,16 @@ struct UniformBufferObject {
   glm::mat4 projection;
   glm::vec4 viewportSize;
   glm::vec4 cameraPosition;
+  glm::vec4 renderSettings;
   glm::vec4 frame;
   glm::vec4 groundColour;
   glm::vec4 skyColourHorizon;
   glm::vec4 skyColourZenith;
   glm::vec4 sunPosition;
   float sunFocus;
-  float sunInternsity;
+  float sunIntensity;
+  float defocusStrenght;
+  float divergeStrength;
 };
 
 VKAPI_ATTR VkBool32 VKAPI_CALL vulkanDebugCallback(
@@ -533,6 +536,17 @@ int main(int argc, char **argv) {
   createCamera(90, window_width / window_height, 0.01f, 10000.0f, &camera);
 
   UniformBufferObject ubo = {};
+  ubo.renderSettings.x = 50;
+  ubo.renderSettings.y = 25;
+  ubo.groundColour = glm::vec4(0.35, 0.3, 0.35, 1.0);
+  ubo.skyColourHorizon = glm::vec4(1.0);
+  ubo.skyColourZenith = glm::vec4(0.078, 0.36, 0.72, 1.0);
+  ubo.sunPosition = glm::normalize(glm::vec4(1.0));
+  ubo.sunFocus = 1.0;
+  ubo.sunIntensity = 0;
+  ubo.defocusStrenght = 0.0;
+  ubo.divergeStrength = 1.0;
+
   bool running = true;
   glm::ivec2 previous_mouse = {0, 0};
   uint32_t last_update_time = SDL_GetTicks();
@@ -597,12 +611,6 @@ int main(int argc, char **argv) {
     ubo.viewportSize =
         glm::vec4(camera.viewport_width, camera.viewport_height, 0.0, 0.0);
     ubo.cameraPosition = glm::vec4(glm::vec3(0.0), 0.0);
-    ubo.groundColour = glm::vec4(0.2, 0.2, 0.2, 1.0);
-    ubo.skyColourHorizon = glm::vec4(1.0);
-    ubo.skyColourZenith = glm::vec4(0.2, 0.3, 0.35, 1.0);
-    ubo.sunPosition = glm::normalize(glm::vec4(1));
-    ubo.sunFocus = 1.0;
-    ubo.sunInternsity = 0.5;
 
     if (!loadBufferData(&ubo_buffer, vma_allocator, &ubo)) {
       FATAL("Failed to load a buffer data!");
@@ -612,7 +620,75 @@ int main(int argc, char **argv) {
     ImGui_ImplVulkan_NewFrame();
     ImGui_ImplSDL2_NewFrame(window);
     ImGui::NewFrame();
-    ImGui::ShowDemoWindow();
+
+    if (ImGui::Begin("Render settings")) {
+      int samples = ubo.renderSettings.x;
+      if (ImGui::DragInt("Number of Samples", &samples, 1.0f, 1, INT_MAX)) {
+        ubo.renderSettings.x = samples;
+        camera_is_dirty = true;
+      }
+      int bounce_count = ubo.renderSettings.y;
+      if (ImGui::DragInt("Bounce Count", &bounce_count, 1.0f, 1, INT_MAX)) {
+        ubo.renderSettings.y = bounce_count;
+        camera_is_dirty = true;
+      }
+
+      glm::vec3 ground_colour = glm::vec3(ubo.groundColour);
+      if (ImGui::DragFloat3("Ground Colour", &ground_colour.x, 0.1f, 0.0f,
+                            1.0f)) {
+        ubo.groundColour = glm::vec4(ground_colour, 1.0);
+        camera_is_dirty = true;
+      }
+
+      glm::vec3 sky_colour_horizon = glm::vec3(ubo.skyColourHorizon);
+      if (ImGui::DragFloat3("Sky Colour Horizon", &sky_colour_horizon.x, 0.1f,
+                            0.0f, 1.0f)) {
+        ubo.skyColourHorizon = glm::vec4(sky_colour_horizon, 1.0);
+        camera_is_dirty = true;
+      }
+
+      glm::vec3 sky_colour_zenith = glm::vec3(ubo.skyColourZenith);
+      if (ImGui::DragFloat3("Sky Colour Zenith", &sky_colour_zenith.x, 0.1f,
+                            0.0f, 1.0f)) {
+        ubo.skyColourZenith = glm::vec4(sky_colour_zenith, 1.0);
+        camera_is_dirty = true;
+      }
+
+      glm::vec3 sun_position = glm::vec3(ubo.sunPosition);
+      if (ImGui::DragFloat3("Sun Position", &sun_position.x, 0.1f)) {
+        ubo.sunPosition = glm::vec4(sun_position, 1.0);
+        camera_is_dirty = true;
+      }
+
+      float sun_focus = ubo.sunFocus;
+      if (ImGui::DragFloat("Sun Focus", &sun_focus, 0.1f, 0, FLT_MAX)) {
+        ubo.sunFocus = sun_focus;
+        camera_is_dirty = true;
+      }
+
+      float sun_intensity = ubo.sunIntensity;
+      if (ImGui::DragFloat("Sun Intensity", &sun_intensity, 0.1f, 0, FLT_MAX)) {
+        ubo.sunIntensity = sun_intensity;
+        camera_is_dirty = true;
+      }
+
+      float defocus_strenght = ubo.defocusStrenght;
+      if (ImGui::DragFloat("Defocus Strength", &defocus_strenght, 0.1f, 0,
+                           FLT_MAX)) {
+        ubo.defocusStrenght = defocus_strenght;
+        camera_is_dirty = true;
+      }
+
+      float divergeStrength = ubo.divergeStrength;
+      if (ImGui::DragFloat("Diverge Strength", &divergeStrength, 0.1f, 0,
+                           FLT_MAX)) {
+        ubo.divergeStrength = divergeStrength;
+        camera_is_dirty = true;
+      }
+
+      ImGui::End();
+    }
+
     ImGui::Render();
 
     vkDeviceWaitIdle(device.logical_device);

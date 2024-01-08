@@ -3,12 +3,6 @@
 #define PI 3.1415926
 #define FLT_MAX 3.402823466e+38
 
-/* TODO: temp */
-#define MAX_BOUNCE_COUNT 25
-#define NUM_RAYS_PER_PIXEL 100
-#define DEFOCUS_STRENGTH 5
-#define DIVERGE_STRENGTH 5
-
 layout(local_size_x = 16, local_size_y = 16) in;
 layout(set = 0, binding = 0, rgba8) uniform image2D resultImage;
 
@@ -17,6 +11,7 @@ layout(set = 1, binding = 0) uniform UniformBufferObject {
   mat4 projection;
   vec4 viewportSize;
   vec4 cameraPosition;
+  vec4 renderSettings;
   vec4 frame;
   vec4 groundColour;
   vec4 skyColourHorizon;
@@ -24,6 +19,8 @@ layout(set = 1, binding = 0) uniform UniformBufferObject {
   vec4 sunPosition;
   float sunFocus;
   float sunInternsity;
+  float defocusStrength;
+  float divergeStrength;
 }
 ubo;
 
@@ -67,6 +64,7 @@ HitInfo calculateRayCollision(Ray ray);
 vec3 trace(Ray ray, inout uint rngState);
 vec3 screenToWorldDirection(vec2 point);
 vec3 getEnvironmentLight(Ray ray);
+float linearToGamma(float linearComponent);
 
 #define NUM_SPHERES 3
 Sphere spheres[NUM_SPHERES];
@@ -112,20 +110,23 @@ void main() {
   uint rngState = pixelIndex + int(ubo.frame.x) * 719393;
 
   vec3 totalIncomingLight = vec3(0.0);
-  for (int rayIndex = 0; rayIndex < NUM_RAYS_PER_PIXEL; rayIndex++) {
+  for (int rayIndex = 0; rayIndex < ubo.renderSettings.x; rayIndex++) {
     Ray ray;
     vec2 defocusJitter =
-        randomPointInCircle(rngState) * DEFOCUS_STRENGTH / imageSize.x;
+        randomPointInCircle(rngState) * ubo.defocusStrength / imageSize.x;
     ray.origin = ubo.cameraPosition.xyz + vec3(defocusJitter / imageSize, 0.0);
     vec2 jitter =
-        randomPointInCircle(rngState) * DIVERGE_STRENGTH / imageSize.x;
+        randomPointInCircle(rngState) * ubo.divergeStrength / imageSize.x;
     ray.dir =
         screenToWorldDirection(gl_GlobalInvocationID.xy) + vec3(jitter, 0.0);
 
     totalIncomingLight += trace(ray, rngState);
   }
 
-  vec3 pixelColor = totalIncomingLight / NUM_RAYS_PER_PIXEL;
+  vec3 pixelColor = totalIncomingLight / ubo.renderSettings.x;
+  pixelColor.x = linearToGamma(pixelColor.x);
+  pixelColor.y = linearToGamma(pixelColor.y);
+  pixelColor.z = linearToGamma(pixelColor.z);
 
   vec4 oldRender =
       vec4(imageLoad(resultImage, ivec2(gl_GlobalInvocationID.xy)).xyz, 1.0);
@@ -220,7 +221,7 @@ vec3 trace(Ray ray, inout uint rngState) {
   vec3 incomingLight = vec3(0.0);
   vec3 rayColour = vec3(1.0);
 
-  for (int i = 0; i < MAX_BOUNCE_COUNT; i++) {
+  for (int i = 0; i < ubo.renderSettings.y; i++) {
     HitInfo hitInfo = calculateRayCollision(ray);
     if (hitInfo.didHit) {
       RayTracingMaterial material = hitInfo.material;
@@ -274,3 +275,5 @@ vec3 getEnvironmentLight(Ray ray) {
 
   return composite;
 }
+
+float linearToGamma(float linearComponent) { return sqrt(linearComponent); }
